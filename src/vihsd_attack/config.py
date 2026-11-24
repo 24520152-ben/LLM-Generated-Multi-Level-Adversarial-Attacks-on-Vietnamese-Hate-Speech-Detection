@@ -36,7 +36,7 @@ class BaselineConfig:
     weight_decay: float = 0.01
     max_length: int = 256
     max_grad_norm: float = 1.0
-    device: str = "auto"
+    device: str = "auto"  # Also accepts "cpu", "cuda:0", or "cuda:1".
     svm_c: float = 1.0
     svm_class_weight: str | None = "balanced"
     # Zhang et al. (SemEval 2019) evaluated this character n-gram range.

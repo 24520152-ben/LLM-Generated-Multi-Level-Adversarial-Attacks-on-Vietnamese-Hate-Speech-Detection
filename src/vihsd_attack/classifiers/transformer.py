@@ -209,6 +209,7 @@ def train_transformer(
         batch_size=config.batch_size,
         device=config.device,
     )
+    print(f"Training {config.model} on {classifier.device}")
     # Tokenize once; dynamic padding still happens per batch.
     encodings = classifier.encode([row.text for row in train], padding=False)
     training_rows = [
