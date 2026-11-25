@@ -18,12 +18,16 @@ Select the Kaggle kernel and click **Run All**. Each notebook clones
 `GITHUB_REPO_URL` into `/kaggle/working/ie403` on the first run and reuses that
 checkout for later runs. Use a fresh Kaggle session to clone a newer revision.
 
-All notebooks run `uv sync --locked --inexact` after locating the checkout
-and before importing the training code. `UV_PROJECT_ENVIRONMENT` points to
-the running kernel's Python environment so its imports use the synced
-dependencies. `--inexact` retains additional Kaggle and Jupyter packages.
-Training runs directly in that kernel. PhoBERT uses `underthesea` for word
-segmentation.
+All notebooks use the same dependency setup. After cloning, `uv sync --locked
+--python 3.12` creates `.venv` inside the checkout with the versions recorded
+in `uv.lock`. Training runs in a fresh process through `uv run --no-sync`.
+Its output streams into the notebook. The first sync downloads Python 3.12
+and packages as needed.
+
+The notebook forwards the Kaggle `HF_TOKEN` secret and environment variables
+to the training process, which uses the GPU specified in `BASELINE_OPTIONS`.
+The project environment includes PhoBERT word segmentation and ViSoBERT
+SentencePiece tokenizer dependencies.
 
 Transformer notebooks run for 10 epochs and select the checkpoint with the
 highest validation macro-F1. Set `"epochs": 1` in the first cell for a test run.
