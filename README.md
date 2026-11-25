@@ -18,10 +18,12 @@ Select the Kaggle kernel and click **Run All**. Each notebook clones
 `GITHUB_REPO_URL` into `/kaggle/working/ie403` on the first run and reuses that
 checkout for later runs. Use a fresh Kaggle session to clone a newer revision.
 
-The PhoBERT notebook runs `uv sync --locked` in the checkout and launches
-training in that project environment. The first sync installs the locked
-PyTorch build and PhoBERT dependencies. The other notebooks run in the selected
-Kaggle kernel.
+All notebooks run `uv sync --locked --inexact` after locating the checkout
+and before importing the training code. `UV_PROJECT_ENVIRONMENT` points to
+the running kernel's Python environment so its imports use the synced
+dependencies. `--inexact` retains additional Kaggle and Jupyter packages.
+Training runs directly in that kernel. PhoBERT uses `underthesea` for word
+segmentation.
 
 Transformer notebooks run for 10 epochs and select the checkpoint with the
 highest validation macro-F1. Set `"epochs": 1` in the first cell for a test run.
