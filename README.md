@@ -1,4 +1,8 @@
-# ViHSD Baselines
+# ViHSD Baselines and Adversarial Attacks
+
+[Research proposal](project_proposal.md) — updated 26 November 2026.
+Four clean baselines have completed one run each (seed 42). The validation attack
+pilot is implemented; no attack or annotation results are available yet.
 
 ## Baseline results
 
@@ -13,7 +17,11 @@ macro-F1 across 10 epochs; SVM has no epoch.
 | XLM-R-base | 5 | 66.22 | 64.90 | 85.72 |
 
 Metrics come from local `artifacts/baselines/<model>/metrics.csv` files.
-Each model has one run with seed 42; confidence intervals have not been estimated.
+Full validation/test results are recorded in
+[the proposal](project_proposal.md#61-clean-baselines). Raw artifacts remain ignored
+by Git. These are single-seed clean scores, without confidence intervals; they do
+not measure adversarial robustness. ViSoBERT is a suggested starting target because it
+has the highest validation macro-F1 in these runs.
 
 ## Run on Kaggle
 
@@ -68,3 +76,128 @@ are in the first cell of each notebook.
 To regenerate per-example predictions, load `checkpoint/` with
 `load_classifier()` and call `predict()` on texts from the original dataset
 snapshot and split.
+
+## Attack pilot on Kaggle
+
+Attack settings are in `src/vihsd_attack/attacks/config.py`; shared labels and
+artifact location remain in `src/vihsd_attack/config.py`.
+
+Open the matching pilot notebook with a **T4 x2** kernel:
+
+| Classifier | Notebook | Output directory |
+|---|---|---|
+| SVM | [pilot_svm.ipynb](scripts/pilot_svm.ipynb) | `artifacts/attacks/svm/` |
+| PhoBERT | [pilot_phobert.ipynb](scripts/pilot_phobert.ipynb) | `artifacts/attacks/phobert/` |
+| ViSoBERT | [pilot_visobert.ipynb](scripts/pilot_visobert.ipynb) | `artifacts/attacks/visobert/` |
+| XLM-R | [pilot_xlmr.ipynb](scripts/pilot_xlmr.ipynb) | `artifacts/attacks/xlmr/` |
+
+Each notebook points to its checkpoint under
+`/kaggle/input/datasets/hophamsailam/vihsd-baselines/baselines/`.
+Attach that dataset to the Kaggle notebook. The checkpoint directory must include
+the saved preprocessing settings (or `model.joblib` and `baseline.json` for SVM).
+The notebook clones and runs `uv sync --locked --python 3.12` just like training.
+It reuses an existing checkout; use a fresh session or update that checkout first.
+
+Qwen3-8B runs in **8-bit on cuda:0**, with FP16 computation and thinking disabled.
+The encoder classifier uses **cuda:1**; SVM uses **CPU**. This is inference;
+neither model is trained again. Run one pilot at a time in a shared GPU session.
+Each notebook samples **30 correctly classified validation examples per label**
+(90 per classifier), shared across its modes and beam widths. Eligibility is
+classifier-specific, so the sampled source IDs can differ between classifiers.
+
+The default grid uses beam widths **1, 3, 5** and query budgets **10, 50, 100**.
+Each example/mode/beam combination runs **once up to 100 classifier evaluations**;
+the smaller budgets are read from its query history. Proposal order, per-call
+seeds, and prompts do not depend on the budget. Eligibility scoring is a separate
+preparation step, outside the attack query budget. A batch of five candidates
+costs five queries; rejected/duplicate candidates cost zero. No separate limit
+on LLM calls is used. A round with no new scored candidate ends the search.
+
+MIX expands parents using all three modes and rotates their starting order across
+examples and rounds. Edits accumulate along each branch. Automatic screening uses:
+
+- **C:** NFC-normalized grapheme Levenshtein distance, at most two edits per step.
+- **W:** at most `max_word_spans=2` diff regions, each bounded by
+  `max_span_tokens=4` on both the parent and candidate sides. A unit is a Unicode
+  letter/number run; it is not a segmented Vietnamese word. Insertions/deletions
+  are allowed so that phrase expansion/contraction is not automatically rejected.
+  A short whole-comment replacement can pass if it fits these bounds.
+- **S:** changed lexical content only. There is no minimum number of diff regions
+  and no automatic confirmation of paraphrasing or syntactic restructuring.
+
+W/S reject changes involving only separators, punctuation or letter case. A small
+character distance does not exclude a lexical replacement; the mode screens can
+overlap. The span length four is an implementation default for validation pilot,
+not a published Vietnamese threshold. W still depends on heuristic diff alignment
+and can accept typos or unsuitable rewrites; S deliberately defers linguistic-level
+judgment to annotation. Review both accepted and rejected candidates before freezing
+these limits. `status=mode` means an automatic edit/form limit failed; `scored`
+means a classifier evaluation, not a human-confirmed mode label.
+
+There is no automatic semantic validator yet. Annotators must confirm the requested
+edit level, meaning, target, offensiveness, and label preservation against the source
+and, when checking a step, its parent. Searches continue past the first prediction
+flip so that a rejected adversarial example does not hide later valid ones.
+
+The shared generation prompt uses `VIHSD_LABEL_RUBRIC` in
+[`constants.py`](src/vihsd_attack/constants.py), following the original
+[ViHSD annotation guideline, Table 1](https://arxiv.org/abs/2103.11528):
+
+| Label | Dataset-specific meaning |
+|---|---|
+| `CLEAN` (0) | No harassment or abusive content. |
+| `OFFENSIVE` (1) | Offensive content or profanity without attacking a specific target. |
+| `HATE` (2) | Abusive content targeting an individual or a group, including implicit or figurative attacks without explicit profanity. |
+
+`HATE` is not restricted to protected groups. The prompt interprets slang and
+obfuscated wording in context, without inventing targets or missing context.
+Generation must preserve the supplied source label and meaning; the rubric does
+not authorize relabeling or rewriting the source to fit a label. It guides
+generation but does not certify candidate validity.
+
+The four notebooks save to `artifacts/attacks/<model>/` via `output_dir`, so their
+results do not overwrite one another. A direct `run_pilot()` call without an
+`output_dir` still defaults to `artifacts/attacks/`. Rerunning a model's pilot
+replaces its two CSV files at the same paths:
+
+- **`candidates.csv`** has 9 columns: `id`, `mode`, `beam_width`, `query`,
+  `parent_query`, `step_mode`, `candidate`, `prediction`, `status`.
+  It keeps proposals and rejection reasons for reviewing the pilot filters, and
+  all scored candidates for reconstructing ASR at each budget. `parent_query`
+  references an earlier scored candidate in the same example/mode/beam search;
+  zero means the original comment. `step_mode` and these links reconstruct the
+  edit sequence without repeating parent text or storing a separate path.
+  Empty query numbers mean the candidate was not scored. For an unparseable LLM
+  response, the raw text appears once in `candidate`, with `status=invalid_output`.
+- **`results.csv`** has 10 columns: `id`, `mode`, `beam_width`, `original`, `label`,
+  `query_budget`, `queries_used`, `auto_success`, `llm_calls`, `seconds`.
+  One row represents an example/mode/beam/budget, including failed searches.
+  Original text and gold labels are stored here; match by `id` to inspect a
+  candidate against its source. Predictions remain in the candidate file rather
+  than being copied into results. `llm_calls` describes the
+  query prefix. `seconds` describes the entire shared search and is filled only
+  on its largest-budget row; smaller budgets leave it empty. `queries_used` below
+  the budget means the search exhausted its candidates.
+
+Margins are used in memory to rank the beam and can be recomputed from the saved
+classifier checkpoint. Candidate rows do not store margins or LLM call numbers.
+
+`auto_success` is a classifier prediction flip, pending human validation. Review
+all scored flips when checking whether a search found any valid adversarial example.
+
+The notebook is ready for a Kaggle run; full Qwen3-8B 8-bit inference has not yet
+been verified on T4. These CSVs, once generated, are validation pilot outputs and
+need human review before they can support valid attack-success claims.
+Keep the notebook options and source revision with the experiment when reporting
+results. Choose the shared configuration on validation before attacking test.
+
+The query-budget values and width 5 follow
+[TREPAT, EMNLP 2025, Sections 3.4–4](https://aclanthology.org/2025.emnlp-main.1405.pdf).
+Widths 1/3, five candidates per call, and the per-step edit/span limits are pilot choices.
+Sampling follows [Qwen3's non-thinking guidance](https://huggingface.co/Qwen/Qwen3-8B).
+
+Local CPU-only search checks live in the ignored `tests/` directory. If available, run:
+
+```bash
+PYTHONPATH=src uv run --no-sync python -m unittest discover -s tests -v
+```
