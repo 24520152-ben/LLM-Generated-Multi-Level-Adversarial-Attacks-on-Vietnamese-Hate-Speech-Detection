@@ -13,3 +13,7 @@ archive/
 
 # Training outputs
 /artifacts/
+/vihsd-baselines.zip
+
+# Local tests
+/tests/
