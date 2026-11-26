@@ -101,9 +101,11 @@ It reuses an existing checkout; use a fresh session or update that checkout firs
 Qwen3-8B runs in **8-bit on cuda:0**, with FP16 computation and thinking disabled.
 The encoder classifier uses **cuda:1**; SVM uses **CPU**. This is inference;
 neither model is trained again. Run one pilot at a time in a shared GPU session.
-Each notebook samples **30 correctly classified validation examples per label**
-(90 per classifier), shared across its modes and beam widths. Eligibility is
+Each notebook samples **5 correctly classified validation examples per label**
+(15 per classifier), shared across its modes and beam widths. Eligibility is
 classifier-specific, so the sampled source IDs can differ between classifiers.
+This small pilot checks output quality and runtime and compares configurations
+preliminarily; expand validation before making final configuration choices.
 
 The default grid uses beam widths **1, 3, 5** and query budgets **10, 50, 100**.
 Each example/mode/beam combination runs **once up to 100 classifier evaluations**;

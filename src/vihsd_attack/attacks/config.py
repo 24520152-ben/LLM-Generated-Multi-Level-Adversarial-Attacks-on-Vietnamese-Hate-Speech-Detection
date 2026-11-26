@@ -16,7 +16,7 @@ class AttackConfig:
     query_budgets: tuple[int, ...] = (10, 50, 100)
     beam_widths: tuple[int, ...] = (1, 3, 5)
     modes: tuple[str, ...] = ("C", "W", "S", "MIX")
-    sample_per_label: int = 30
+    sample_per_label: int = 5
     seed: int = 42
     candidates_per_call: int = 5
     max_new_tokens: int = 2048
