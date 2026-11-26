@@ -19,6 +19,7 @@ class AttackConfig:
     sample_per_label: int = 5
     seed: int = 42
     candidates_per_call: int = 5
+    max_generation_slots: int = 100
     max_new_tokens: int = 2048
     # Qwen3's recommended non-thinking sampling settings.
     temperature: float = 0.7
@@ -51,6 +52,7 @@ class AttackConfig:
         for name in (
             "sample_per_label",
             "candidates_per_call",
+            "max_generation_slots",
             "max_new_tokens",
             "max_char_edits",
             "max_word_spans",

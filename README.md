@@ -112,8 +112,18 @@ Each example/mode/beam combination runs **once up to 100 classifier evaluations*
 the smaller budgets are read from its query history. Proposal order, per-call
 seeds, and prompts do not depend on the budget. Eligibility scoring is a separate
 preparation step, outside the attack query budget. A batch of five candidates
-costs five queries; rejected/duplicate candidates cost zero. No separate limit
-on LLM calls is used. A round with no new scored candidate ends the search.
+costs five queries; rejected/duplicate candidates cost zero.
+
+Each example/mode/beam search also has **`max_generation_slots=100`**, shared
+across all parents and, in MIX, all three generation modes. Each call consumes
+its requested number of candidates before filtering, even for duplicates,
+rejected candidates, missing entries or malformed responses. With five slots
+per call, this permits at most **20 LLM calls per search**. A partial final call
+requests only the remaining slots. Extra outputs are recorded as `extra` and
+are not scored; this cap limits requested slots rather than guaranteeing how
+many strings the LLM actually returns. Search ends when either budget is used
+up or a round produces no new scored candidate. The generation cap is a pilot
+cost-control choice, not a value established by prior papers.
 
 MIX expands parents using all three modes and rotates their starting order across
 examples and rounds. Edits accumulate along each branch. Automatic screening uses:
@@ -179,7 +189,8 @@ replaces its two CSV files at the same paths:
   than being copied into results. `llm_calls` describes the
   query prefix. `seconds` describes the entire shared search and is filled only
   on its largest-budget row; smaller budgets leave it empty. `queries_used` below
-  the budget means the search exhausted its candidates.
+  the budget means the search stopped before reaching that query budget, either
+  because no new candidates were scored or the generation-slot cap was reached.
 
 Margins are used in memory to rank the beam and can be recomputed from the saved
 classifier checkpoint. Candidate rows do not store margins or LLM call numbers.

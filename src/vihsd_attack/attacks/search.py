@@ -59,33 +59,37 @@ def beam_search(
     original = Candidate(example.text, margin(initial_scores, example.label))
     beam, seen = [original], {example.text}
     events, scored, calls_at_query = [], [], []
-    queries = calls = round_id = 0
+    queries = calls = round_id = slots_used = 0
     seed_key = f"{config.seed}:{example.id}:{mode}".encode()
     seed = int.from_bytes(hashlib.sha256(seed_key).digest()[:4], "big")
     max_queries = max(config.query_budgets)
     started = perf_counter()
-    while beam and queries < max_queries:
+    while beam and queries < max_queries and slots_used < config.max_generation_slots:
         children = []
         # Rotate MIX's starting mode across examples and rounds, independent of Q.
         modes = [mode] if mode != "MIX" else ["C", "W", "S"]
         offset = (seed + round_id) % len(modes)
         modes = modes[offset:] + modes[:offset]
         for parent, step_mode in product(beam, modes):
-            if queries >= max_queries:
+            count = min(
+                config.candidates_per_call, config.max_generation_slots - slots_used
+            )
+            if queries >= max_queries or count == 0:
                 break
             calls += 1
+            # Reserve requested slots even when generation fails or is filtered.
+            slots_used += count
             generated = generator.generate(
                 example.text,
                 parent.text,
                 example.label,
                 step_mode,
                 (seed + calls) % (2**32),
+                count,
             )
             pending = []
             proposals = generated.candidates
-            slots = proposals + [None] * max(
-                0, config.candidates_per_call - len(proposals)
-            )
+            slots = proposals + [None] * max(0, count - len(proposals))
             for slot, value in enumerate(slots):
                 text = value.strip() if isinstance(value, str) else ""
                 row = {
@@ -95,7 +99,7 @@ def beam_search(
                     "query": "",
                     "prediction": "",
                 }
-                if slot >= config.candidates_per_call:
+                if slot >= count:
                     status = "extra"
                 elif slot >= len(proposals):
                     status = "missing"

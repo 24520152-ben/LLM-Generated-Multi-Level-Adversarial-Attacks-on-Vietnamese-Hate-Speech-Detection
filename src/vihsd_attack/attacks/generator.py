@@ -54,6 +54,7 @@ class CandidateGenerator:
         label: int,
         mode: str,
         seed: int,
+        count: int,
     ) -> Generation:
         """Generate candidates without using the query budget in the prompt.
 
@@ -63,6 +64,7 @@ class CandidateGenerator:
             label: Source ViHSD label ID.
             mode: C, W, or S for this step.
             seed: Reproducible seed for this individual LLM call.
+            count: Requested candidates, bounded by the remaining generation slots.
 
         Returns:
             Parsed JSON candidates and raw output for inspecting format failures.
@@ -77,7 +79,7 @@ class CandidateGenerator:
             max_span_tokens=config.max_span_tokens,
         )
         prompt = ATTACK_USER_PROMPT.format(
-            count=config.candidates_per_call,
+            count=count,
             mode=mode,
             guidance=guidance,
             data=json.dumps(
