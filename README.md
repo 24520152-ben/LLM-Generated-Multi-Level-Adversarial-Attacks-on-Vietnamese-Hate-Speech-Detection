@@ -107,23 +107,29 @@ classifier-specific, so the sampled source IDs can differ between classifiers.
 This small pilot checks output quality and runtime and compares configurations
 preliminarily; expand validation before making final configuration choices.
 
-The default grid uses beam widths **1, 3, 5** and query budgets **10, 50, 100**.
-Each example/mode/beam combination runs **once up to 100 classifier evaluations**;
-the smaller budgets are read from its query history. Proposal order, per-call
-seeds, and prompts do not depend on the budget. Eligibility scoring is a separate
+The default grid uses beam widths **1, 3, 5**, **Q=1–100 in steps of 1**, and
+**G=5–100 in steps of 5** (`query_budgets` and `generation_budgets`). Each
+example/mode/beam combination runs **once up to Q=100 and G=100**; its history
+provides all 2,000 Q/G result rows without repeating generation or scoring.
+Proposal order, per-call seeds, and prompts do not depend on lower checkpoints.
+Eligibility scoring is a separate
 preparation step, outside the attack query budget. A batch of five candidates
 costs five queries; rejected/duplicate candidates cost zero.
 
-Each example/mode/beam search also has **`max_generation_slots=100`**, shared
+The maximum of `generation_budgets` caps requested generation slots, shared
 across all parents and, in MIX, all three generation modes. Each call consumes
 its requested number of candidates before filtering, even for duplicates,
 rejected candidates, missing entries or malformed responses. With five slots
-per call, this permits at most **20 LLM calls per search**. A partial final call
-requests only the remaining slots. Extra outputs are recorded as `extra` and
+per call, G=100 permits at most **20 LLM calls per search**. Intermediate G values
+must be multiples of `candidates_per_call` so that their prefixes keep identical
+generation requests. Only the largest G may end with a partial call, requesting
+its remaining slots. Extra outputs are recorded as `extra` and
 are not scored; this cap limits requested slots rather than guaranteeing how
 many strings the LLM actually returns. Search ends when either budget is used
 up or a round produces no new scored candidate. The generation cap is a pilot
-cost-control choice, not a value established by prior papers.
+cost-control choice, not a value established by prior papers. Rejected-output
+audit rows describe the full trajectory. The console summarizes only the largest
+Q/G pair for each mode/beam; all budget pairs are available in the result CSV.
 
 MIX expands parents using all three modes and rotates their starting order across
 examples and rounds. Edits accumulate along each branch. Automatic screening uses:
@@ -181,16 +187,20 @@ replaces its two CSV files at the same paths:
   edit sequence without repeating parent text or storing a separate path.
   Empty query numbers mean the candidate was not scored. For an unparseable LLM
   response, the raw text appears once in `candidate`, with `status=invalid_output`.
-- **`results.csv`** has 10 columns: `id`, `mode`, `beam_width`, `original`, `label`,
-  `query_budget`, `queries_used`, `auto_success`, `llm_calls`, `seconds`.
-  One row represents an example/mode/beam/budget, including failed searches.
+- **`results.csv`** has 11 columns: `id`, `mode`, `beam_width`, `original`, `label`,
+  `query_budget`, `generation_budget`, `queries_used`, `auto_success`, `llm_calls`,
+  `seconds`. One row represents an example/mode/beam/Q/G, including failed searches.
   Original text and gold labels are stored here; match by `id` to inspect a
   candidate against its source. Predictions remain in the candidate file rather
-  than being copied into results. `llm_calls` describes the
-  query prefix. `seconds` describes the entire shared search and is filled only
-  on its largest-budget row; smaller budgets leave it empty. `queries_used` below
+  than being copied into results. `llm_calls` describes the joint Q/G prefix,
+  including failed generation calls before that prefix ends. `seconds` describes
+  the entire shared search and is filled only on its largest Q/G row; other
+  budget pairs leave it empty. `queries_used` below
   the budget means the search stopped before reaching that query budget, either
   because no new candidates were scored or the generation-slot cap was reached.
+  To reconstruct a pair's scored candidate pool, match `id`, `mode`, `beam_width`
+  and select `status=scored` with `query <= queries_used`, rather than just Q.
+  Thus the candidate CSV stores one trajectory without adding a G column.
 
 Margins are used in memory to rank the beam and can be recomputed from the saved
 classifier checkpoint. Candidate rows do not store margins or LLM call numbers.
@@ -198,15 +208,27 @@ classifier checkpoint. Candidate rows do not store margins or LLM call numbers.
 `auto_success` is a classifier prediction flip, pending human validation. Review
 all scored flips when checking whether a search found any valid adversarial example.
 
+The final adversarial test set will retain **every distinct, validated successful
+variant** within the test configurations and budgets fixed on validation. If one
+source has seven valid successful variants, all seven are retained. Margin ranks
+beam expansions; it does not select a single variant for the released dataset.
+Deduplicate by source ID and NFC-normalized variant text, preserving provenance
+and condition-specific validation from every contributing attack. ASR remains
+source-based within each attack condition. For full-test before/after metrics,
+each source contributes total weight one across its variants, with the original
+retained when no valid successful variant exists. These are construction and
+evaluation rules; annotation and final dataset export are not implemented yet.
+
 The notebook is ready for a Kaggle run; full Qwen3-8B 8-bit inference has not yet
 been verified on T4. These CSVs, once generated, are validation pilot outputs and
 need human review before they can support valid attack-success claims.
 Keep the notebook options and source revision with the experiment when reporting
 results. Choose the shared configuration on validation before attacking test.
 
-The query-budget values and width 5 follow
+The query-budget landmarks 10/50/100 and width 5 follow
 [TREPAT, EMNLP 2025, Sections 3.4–4](https://aclanthology.org/2025.emnlp-main.1405.pdf).
-Widths 1/3, five candidates per call, and the per-step edit/span limits are pilot choices.
+The denser Q/G checkpoints, widths 1/3, five candidates per call, and the per-step
+edit/span limits are pilot choices.
 Sampling follows [Qwen3's non-thinking guidance](https://huggingface.co/Qwen/Qwen3-8B).
 
 Local CPU-only search checks live in the ignored `tests/` directory. If available, run:
