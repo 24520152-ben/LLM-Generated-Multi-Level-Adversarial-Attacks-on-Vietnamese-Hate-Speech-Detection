@@ -6,20 +6,20 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AttackConfig:
-    """Pilot settings; query budgets share one search trajectory per beam width."""
+    """Pilot settings; Q/G budgets share one search trajectory per beam width."""
 
     checkpoint_dir: str | Path
     llm_checkpoint: str = "Qwen/Qwen3-8B"
     llm_revision: str | None = None
     llm_device: str = "cuda:0"
     classifier_device: str = "cuda:1"
-    query_budgets: tuple[int, ...] = (10, 50, 100)
+    query_budgets: tuple[int, ...] = tuple(range(1, 101))
+    generation_budgets: tuple[int, ...] = tuple(range(5, 101, 5))
     beam_widths: tuple[int, ...] = (1, 3, 5)
     modes: tuple[str, ...] = ("C", "W", "S", "MIX")
     sample_per_label: int = 5
     seed: int = 42
     candidates_per_call: int = 5
-    max_generation_slots: int = 100
     max_new_tokens: int = 2048
     # Qwen3's recommended non-thinking sampling settings.
     temperature: float = 0.7
@@ -35,7 +35,7 @@ class AttackConfig:
 
     def __post_init__(self) -> None:
         """Reject empty grids, invalid modes, and nonpositive pilot settings."""
-        for name in ("query_budgets", "beam_widths"):
+        for name in ("query_budgets", "generation_budgets", "beam_widths"):
             values = getattr(self, name)
             if (
                 not values
@@ -52,7 +52,6 @@ class AttackConfig:
         for name in (
             "sample_per_label",
             "candidates_per_call",
-            "max_generation_slots",
             "max_new_tokens",
             "max_char_edits",
             "max_word_spans",
@@ -61,6 +60,14 @@ class AttackConfig:
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if any(
+            budget % self.candidates_per_call
+            for budget in self.generation_budgets
+            if budget != max(self.generation_budgets)
+        ):
+            raise ValueError(
+                "Intermediate generation budgets must align with candidates_per_call"
+            )
         if self.seed < 0 or self.temperature <= 0 or not 0 < self.top_p <= 1:
             raise ValueError("Invalid seed or sampling settings")
         if self.top_k < 0:

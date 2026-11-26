@@ -80,6 +80,7 @@ def run_pilot(config: AttackConfig) -> Path:
         "original",
         "label",
         "query_budget",
+        "generation_budget",
         "queries_used",
         "auto_success",
         "llm_calls",
@@ -124,14 +125,14 @@ def run_pilot(config: AttackConfig) -> Path:
                 "label": LABELS[example.label],
             }
             result_writer.writerows({**source, **row} for row in snapshots)
-            for row in snapshots:
-                successes[mode, width, row["query_budget"]] += row["auto_success"]
+            successes[mode, width] += snapshots[-1]["auto_success"]
             candidates.flush()
             results.flush()
             progress.update()
-    for (mode, width, budget), count in sorted(successes.items()):
+    for (mode, width), count in sorted(successes.items()):
         print(
-            f"{mode} beam={width} Q={budget}: automatic ASR "
+            f"{mode} beam={width} Q={max(config.query_budgets)} "
+            f"G={max(config.generation_budgets)}: automatic ASR "
             f"{count / len(sample):.2%} ({count}/{len(sample)})",
             flush=True,
         )

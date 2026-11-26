@@ -37,7 +37,7 @@ def beam_search(
     mode: str,
     beam_width: int,
 ) -> tuple[list[dict], list[dict]]:
-    """Search once and read each query-budget result from the same trajectory.
+    """Search once and read each Q/G result from the same trajectory.
 
     Args:
         example: Correctly classified source example.
@@ -59,21 +59,21 @@ def beam_search(
     original = Candidate(example.text, margin(initial_scores, example.label))
     beam, seen = [original], {example.text}
     events, scored, calls_at_query = [], [], []
+    queries_at_call = []
     queries = calls = round_id = slots_used = 0
     seed_key = f"{config.seed}:{example.id}:{mode}".encode()
     seed = int.from_bytes(hashlib.sha256(seed_key).digest()[:4], "big")
     max_queries = max(config.query_budgets)
+    max_slots = max(config.generation_budgets)
     started = perf_counter()
-    while beam and queries < max_queries and slots_used < config.max_generation_slots:
+    while beam and queries < max_queries and slots_used < max_slots:
         children = []
         # Rotate MIX's starting mode across examples and rounds, independent of Q.
         modes = [mode] if mode != "MIX" else ["C", "W", "S"]
         offset = (seed + round_id) % len(modes)
         modes = modes[offset:] + modes[:offset]
         for parent, step_mode in product(beam, modes):
-            count = min(
-                config.candidates_per_call, config.max_generation_slots - slots_used
-            )
+            count = min(config.candidates_per_call, max_slots - slots_used)
             if queries >= max_queries or count == 0:
                 break
             calls += 1
@@ -118,9 +118,11 @@ def beam_search(
                 row["status"] = status
                 events.append(row)
             pending = pending[: max_queries - queries]
-            if not pending:
-                continue
-            scores = classifier.predict_scores([row["candidate"] for row in pending])
+            scores = (
+                classifier.predict_scores([row["candidate"] for row in pending])
+                if pending
+                else []
+            )
             for row, values in zip(pending, scores, strict=True):
                 queries += 1
                 value = margin(values, example.label)
@@ -133,24 +135,40 @@ def beam_search(
                 children.append(Candidate(row["candidate"], value, queries))
                 scored.append(row)
                 calls_at_query.append(calls)
+            queries_at_call.append(queries)
         # Stable sorting preserves proposal order when scores tie.
         beam = sorted(children, key=lambda item: item.margin, reverse=True)[:beam_width]
         round_id += 1
     elapsed = perf_counter() - started
+    first_success = next(
+        (row["query"] for row in scored if row["prediction"] != LABELS[example.label]),
+        math.inf,
+    )
     results = []
-    for budget in sorted(config.query_budgets):
-        prefix = scored[:budget]
-        exhausted = queries < budget
+    for generation_budget, budget in product(
+        sorted(config.generation_budgets), sorted(config.query_budgets)
+    ):
+        allowed_calls = min(
+            calls,
+            (generation_budget + config.candidates_per_call - 1)
+            // config.candidates_per_call,
+        )
+        used = min(budget, queries_at_call[allowed_calls - 1])
         results.append(
             {
                 "query_budget": budget,
-                "queries_used": len(prefix),
-                "auto_success": any(
-                    row["prediction"] != LABELS[example.label] for row in prefix
+                "generation_budget": generation_budget,
+                "queries_used": used,
+                "auto_success": first_success <= used,
+                "llm_calls": (
+                    calls_at_query[used - 1] if used == budget else allowed_calls
                 ),
-                "llm_calls": calls if exhausted else calls_at_query[len(prefix) - 1],
-                # Full-trajectory runtime appears only once, at the largest budget.
-                "seconds": round(elapsed, 3) if budget == max_queries else "",
+                # Full-trajectory runtime appears only once, at the largest Q/G pair.
+                "seconds": (
+                    round(elapsed, 3)
+                    if budget == max_queries and generation_budget == max_slots
+                    else ""
+                ),
             }
         )
     return events, results
