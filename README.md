@@ -1,5 +1,20 @@
 # ViHSD Baselines
 
+## Baseline results
+
+Values are percentages. Encoder checkpoints were selected by the highest validation
+macro-F1 across 10 epochs; SVM has no epoch.
+
+| Model | Selected epoch | Validation macro-F1 | Test macro-F1 | Test accuracy |
+|---|---:|---:|---:|---:|
+| Linear SVM | — | 62.59 | 61.83 | 86.72 |
+| PhoBERT-base | 3 | 67.46 | 64.10 | 87.53 |
+| ViSoBERT | 1 | 68.33 | 66.67 | 87.46 |
+| XLM-R-base | 5 | 66.22 | 64.90 | 85.72 |
+
+Metrics come from local `artifacts/baselines/<model>/metrics.csv` files.
+Each model has one run with seed 42; confidence intervals have not been estimated.
+
 ## Run on Kaggle
 
 Start a Kaggle session with GPU and Internet enabled. Accept the access conditions
@@ -39,14 +54,15 @@ prints its selected device and keeps its own checkpoint and CSV output.
 
 ## Run outputs
 
-Each run under `artifacts/baselines/<model>/<run_id>/` saves two items.
+Each model saves two items directly under `artifacts/baselines/<model>/`.
+Rerunning training replaces that model's checkpoint and metrics at the same paths.
 
 - `checkpoint/` contains the model and the files needed by `load_classifier()`.
 - `metrics.csv` has four columns (`split`, `epoch`, `macro_f1`, `accuracy`). A
   Transformer run writes one validation row per epoch and one test row for the
   selected epoch. SVM writes one row per split with an empty `epoch` column.
 
-Baseline defaults are in `src/vihsd_attack/config.py`. Run-specific overrides
+Baseline defaults are in `src/vihsd_attack/classifiers/config.py`. Run-specific overrides
 are in the first cell of each notebook.
 
 To regenerate per-example predictions, load `checkpoint/` with

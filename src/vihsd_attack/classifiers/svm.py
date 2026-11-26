@@ -7,7 +7,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import make_pipeline
 from sklearn.svm import LinearSVC
 
-from vihsd_attack.config import LABELS, BaselineConfig
+from vihsd_attack.classifiers.config import BaselineConfig
+from vihsd_attack.config import LABELS
 from vihsd_attack.data import Example
 
 

@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 
-from vihsd_attack.config import LABELS, BaselineConfig
+from vihsd_attack.classifiers.config import BaselineConfig
+from vihsd_attack.config import LABELS
 
 
 @dataclass(frozen=True)

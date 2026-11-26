@@ -14,9 +14,10 @@ from transformers import (
     DataCollatorWithPadding,
 )
 
-from vihsd_attack.config import LABELS, BaselineConfig
-from vihsd_attack.data import Example
+from vihsd_attack.classifiers.config import BaselineConfig
 from vihsd_attack.classifiers.metrics import compute_metrics
+from vihsd_attack.config import LABELS
+from vihsd_attack.data import Example
 
 
 def resolve_device(device: str) -> str:

@@ -4,18 +4,17 @@ import csv
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
-from vihsd_attack.config import LABELS, BaselineConfig
-from vihsd_attack.data import Example, load_vihsd
+from vihsd_attack.classifiers.config import BaselineConfig
 from vihsd_attack.classifiers.metrics import compute_metrics
+from vihsd_attack.config import LABELS
+from vihsd_attack.data import Example, load_vihsd
 
 
 @dataclass(frozen=True)
 class BaselineResult:
-    run_dir: Path
+    output_dir: Path
     checkpoint_dir: Path
     metrics: dict
 
@@ -54,32 +53,25 @@ def _evaluate(classifier, rows: list[Example], split: str) -> dict[str, float]:
         predicted.extend(classifier.predict([row.text for row in chunk]))
     metrics = compute_metrics(gold, predicted)
     print(
-        f"{split}: macro-F1 = {metrics['macro_f1']:.2%}, "
-        f"accuracy = {metrics['accuracy']:.2%}"
+        f"{split}: macro-F1 = {metrics['macro_f1']:.2%}, accuracy = {metrics['accuracy']:.2%}"
     )
     return metrics
 
 
 def run_baseline(config: BaselineConfig) -> BaselineResult:
-    """Train a ViHSD baseline and persist evaluation outputs.
+    """Train a baseline and save directly under its model directory.
 
     Args:
         config: Model, dataset, training, and output settings for the run.
 
     Returns:
-        The run and checkpoint directories together with validation and test
+        The output and checkpoint directories together with validation and test
         metrics.
-
-    Raises:
-        FileExistsError: The requested run directory already exists.
     """
     token = _hf_token()
-    run_id = config.run_id or (
-        f"seed-{config.seed}_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}_{uuid4().hex[:8]}"
-    )
-    run_dir = Path(config.artifact_dir) / config.model / run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
-    checkpoint_dir = run_dir / "checkpoint"
+    output_dir = Path(config.artifact_dir) / config.model
+    output_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = output_dir / "checkpoint"
     splits = load_vihsd(config, token=token)
     if config.model == "svm":
         from vihsd_attack.classifiers.svm import train_svm
@@ -100,7 +92,7 @@ def run_baseline(config: BaselineConfig) -> BaselineResult:
 
     validation = validation_history[(best_epoch or 1) - 1]
     test = _evaluate(classifier, splits.test, "test")
-    with (run_dir / "metrics.csv").open("w", encoding="utf-8", newline="") as output:
+    with (output_dir / "metrics.csv").open("w", encoding="utf-8", newline="") as output:
         writer = csv.DictWriter(output, ["split", "epoch", "macro_f1", "accuracy"])
         writer.writeheader()
         for epoch, scores in enumerate(validation_history, start=1):
@@ -113,9 +105,9 @@ def run_baseline(config: BaselineConfig) -> BaselineResult:
             )
         writer.writerow({"split": "test", "epoch": best_epoch, **test})
 
-    print(f"Saved baseline: {run_dir}")
+    print(f"Saved baseline: {output_dir}")
     return BaselineResult(
-        run_dir, checkpoint_dir, {"validation": validation, "test": test}
+        output_dir, checkpoint_dir, {"validation": validation, "test": test}
     )
 
 
