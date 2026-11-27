@@ -60,6 +60,7 @@ def beam_search(
     beam, seen = [original], {example.text}
     events, scored, calls_at_query = [], [], []
     queries_at_call = []
+    hits_at_call = [0]
     queries = calls = round_id = slots_used = 0
     seed_key = f"{config.seed}:{example.id}:{mode}".encode()
     seed = int.from_bytes(hashlib.sha256(seed_key).digest()[:4], "big")
@@ -87,6 +88,7 @@ def beam_search(
                 (seed + calls) % (2**32),
                 count,
             )
+            hits_at_call.append(hits_at_call[-1] + int(generated.cache_hit))
             pending = []
             proposals = generated.candidates
             slots = proposals + [None] * max(0, count - len(proposals))
@@ -103,7 +105,7 @@ def beam_search(
                     status = "extra"
                 elif slot >= len(proposals):
                     status = "missing"
-                    if slot == 0 and generated.raw:
+                    if slot == 0 and generated.invalid_output:
                         status = "invalid_output"
                         row["candidate"] = generated.raw
                 elif not text:
@@ -154,15 +156,16 @@ def beam_search(
             // config.candidates_per_call,
         )
         used = min(budget, queries_at_call[allowed_calls - 1])
+        requests = calls_at_query[used - 1] if used == budget else allowed_calls
+        cache_hits = hits_at_call[requests]
         results.append(
             {
                 "query_budget": budget,
                 "generation_budget": generation_budget,
                 "queries_used": used,
                 "auto_success": first_success <= used,
-                "llm_calls": (
-                    calls_at_query[used - 1] if used == budget else allowed_calls
-                ),
+                "llm_calls": requests - cache_hits,
+                "cache_hits": cache_hits,
                 # Full-trajectory runtime appears only once, at the largest Q/G pair.
                 "seconds": (
                     round(elapsed, 3)

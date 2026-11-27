@@ -1,8 +1,8 @@
 # ViHSD Baselines and Adversarial Attacks
 
 [Research proposal](project_proposal.md) — updated 26 November 2026.
-Four clean baselines have completed one run each (seed 42). The validation attack
-pilot is implemented; no attack or annotation results are available yet.
+Four clean baselines have completed one run each (seed 42). Validation attack
+pilot outputs are available for ViSoBERT and XLM-R; candidates are not annotated yet.
 
 ## Baseline results
 
@@ -120,7 +120,8 @@ The maximum of `generation_budgets` caps requested generation slots, shared
 across all parents and, in MIX, all three generation modes. Each call consumes
 its requested number of candidates before filtering, even for duplicates,
 rejected candidates, missing entries or malformed responses. With five slots
-per call, G=100 permits at most **20 LLM calls per search**. Intermediate G values
+per call, G=100 permits at most **20 generation requests per search**, including
+cache hits. Intermediate G values
 must be multiples of `candidates_per_call` so that their prefixes keep identical
 generation requests. Only the largest G may end with a partial call, requesting
 its remaining slots. Extra outputs are recorded as `extra` and
@@ -131,10 +132,21 @@ cost-control choice, not a value established by prior papers. Rejected-output
 audit rows describe the full trajectory. The console summarizes only the largest
 Q/G pair for each mode/beam; all budget pairs are available in the result CSV.
 
+The generator caches raw responses **in RAM for the current source comment**.
+An identical system/user prompt, seed and decoding settings reuse the response
+across beam widths. The loaded LLM/tokenizer stay fixed for that cache instance.
+Malformed or empty responses are cached too. Returned candidates are parsed anew
+so callers cannot modify the cached value. Cache entries are cleared when moving
+to another source and are not saved to disk or shared between notebook runs.
+Hits consume the same G slots as misses and follow the same classifier Q rules;
+seeds still use request order. Beam order remains 1/3/5: whichever width runs first
+pays for shared requests. Warm-cache timings and actual LLM calls depend on run
+order, so report the order/cache policy when comparing compute costs.
+
 MIX expands parents using all three modes and rotates their starting order across
 examples and rounds. Edits accumulate along each branch. Automatic screening uses:
 
-- **C:** NFC-normalized grapheme Levenshtein distance, at most two edits per step.
+- **C:** NFC-normalized grapheme Levenshtein distance, one or two edits per step.
 - **W:** at most `max_word_spans=2` diff regions, each bounded by
   `max_span_tokens=4` on both the parent and candidate sides. A unit is a Unicode
   letter/number run; it is not a segmented Vietnamese word. Insertions/deletions
@@ -156,6 +168,23 @@ There is no automatic semantic validator yet. Annotators must confirm the reques
 edit level, meaning, target, offensiveness, and label preservation against the source
 and, when checking a step, its parent. Searches continue past the first prediction
 flip so that a rejected adversarial example does not hide later valid ones.
+
+C guidance was revised after the uncached pilot mostly returned unchanged text.
+The prompt now requires a nonidentity edit, explains whole-comment grapheme costs
+(including two edits for swapping adjacent characters), and supplies two synthetic
+Vietnamese demonstrations in the same JSON-array format as the requested output.
+All ten example candidates pass the existing C screen even at a one-edit limit.
+It permits local spelling/diacritic changes only when the intended reading is
+preserved, and allows fewer candidates rather than padding with unchanged copies.
+This adapts typo/few-shot guidance from
+[PromptAttack, ICLR 2024, Sections 3.1/3.3](https://proceedings.iclr.cc/paper_files/paper/2024/file/0c72285e193ec90dca93258128698cfb-Paper-Conference.pdf)
+and operations from [TextBugger, NDSS 2019, Section III-C](https://www.ndss-symposium.org/wp-content/uploads/2019/02/ndss2019_03A-5_Li_paper.pdf).
+The examples/counting policy are project choices, not Vietnamese thresholds
+validated by those papers. Filters and shared prompts are unchanged; W/S wording is preserved but now
+uses multiline formatting;
+both C and MIX need fresh model evaluation under the revised C prompt. Existing
+pilot CSVs still describe the previous prompt. Syntax/example checks do not prove
+that Qwen3 follows the new instructions or that its candidates preserve meaning.
 
 The shared generation prompt uses `VIHSD_LABEL_RUBRIC` in
 [`constants.py`](src/vihsd_attack/constants.py), following the original
@@ -185,15 +214,23 @@ replaces its two CSV files at the same paths:
   references an earlier scored candidate in the same example/mode/beam search;
   zero means the original comment. `step_mode` and these links reconstruct the
   edit sequence without repeating parent text or storing a separate path.
-  Empty query numbers mean the candidate was not scored. For an unparseable LLM
-  response, the raw text appears once in `candidate`, with `status=invalid_output`.
-- **`results.csv`** has 11 columns: `id`, `mode`, `beam_width`, `original`, `label`,
+  Empty query numbers mean the candidate was not scored. Valid `[]` (including
+  a JSON code fence) marks every requested position `missing`. Unparseable output,
+  an empty response, or JSON whose top level is not an array marks the first
+  position `invalid_output`, retaining raw text there; other positions are
+  `missing`. Invalid individual array entries, such as `""` or `null`, are `format`.
+  Empty/invalid positions consume G without a classifier query; valid strings
+  elsewhere in a partially populated array are still processed normally.
+- **`results.csv`** has 12 columns: `id`, `mode`, `beam_width`, `original`, `label`,
   `query_budget`, `generation_budget`, `queries_used`, `auto_success`, `llm_calls`,
-  `seconds`. One row represents an example/mode/beam/Q/G, including failed searches.
+  `cache_hits`, `seconds`. One row represents an example/mode/beam/Q/G, including failed searches.
   Original text and gold labels are stored here; match by `id` to inspect a
   candidate against its source. Predictions remain in the candidate file rather
-  than being copied into results. `llm_calls` describes the joint Q/G prefix,
-  including failed generation calls before that prefix ends. `seconds` describes
+  than being copied into results. `llm_calls` counts actual model inference calls;
+  `cache_hits` counts reused responses in the joint Q/G prefix. Their sum is the
+  number of generation requests, including failed responses before the prefix ends.
+  Existing CSVs from runs before caching have no `cache_hits` column and their
+  `llm_calls` are all actual inference calls. `seconds` describes
   the entire shared search and is filled only on its largest Q/G row; other
   budget pairs leave it empty. `queries_used` below
   the budget means the search stopped before reaching that query budget, either
@@ -219,9 +256,9 @@ each source contributes total weight one across its variants, with the original
 retained when no valid successful variant exists. These are construction and
 evaluation rules; annotation and final dataset export are not implemented yet.
 
-The notebook is ready for a Kaggle run; full Qwen3-8B 8-bit inference has not yet
-been verified on T4. These CSVs, once generated, are validation pilot outputs and
-need human review before they can support valid attack-success claims.
+Existing ViSoBERT/XLM-R pilot CSVs were generated on Kaggle before request caching.
+The cache-enabled generator still needs a timed T4 run. Pilot outputs need human
+review before they can support valid attack-success claims.
 Keep the notebook options and source revision with the experiment when reporting
 results. Choose the shared configuration on validation before attacking test.
 

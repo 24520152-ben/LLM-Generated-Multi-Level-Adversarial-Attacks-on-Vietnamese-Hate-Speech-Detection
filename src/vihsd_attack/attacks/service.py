@@ -84,11 +84,13 @@ def run_pilot(config: AttackConfig) -> Path:
         "queries_used",
         "auto_success",
         "llm_calls",
+        "cache_hits",
         "seconds",
     ]
     print(f"Saving pilot to {output_dir}", flush=True)
     total = len(sample) * len(config.modes) * len(config.beam_widths)
     successes = defaultdict(int)
+    llm_calls = cache_hits = 0
     with (
         (output_dir / "candidates.csv").open(
             "w", encoding="utf-8", newline=""
@@ -126,6 +128,8 @@ def run_pilot(config: AttackConfig) -> Path:
             }
             result_writer.writerows({**source, **row} for row in snapshots)
             successes[mode, width] += snapshots[-1]["auto_success"]
+            llm_calls += snapshots[-1]["llm_calls"]
+            cache_hits += snapshots[-1]["cache_hits"]
             candidates.flush()
             results.flush()
             progress.update()
@@ -136,5 +140,6 @@ def run_pilot(config: AttackConfig) -> Path:
             f"{count / len(sample):.2%} ({count}/{len(sample)})",
             flush=True,
         )
+    print(f"LLM: {llm_calls} model calls, {cache_hits} cache hits", flush=True)
     print(f"Saved pilot: {output_dir}", flush=True)
     return output_dir
