@@ -97,24 +97,22 @@ Each notebook points to its checkpoint under
 `/kaggle/input/datasets/hophamsailam/vihsd-baselines/baselines/`.
 Attach that dataset to the Kaggle notebook. The checkpoint directory must include
 the saved preprocessing settings (or `model.joblib` and `baseline.json` for SVM).
-The notebook clones and runs `uv sync --locked --python 3.12 --no-default-groups --group attacks`
-in `.venv-attacks`.
+The notebook clones and runs `uv sync --locked --python 3.12` in `.venv`.
 It reuses an existing checkout; use a fresh session or update that checkout first.
 
-The rerun uses **Qwen/Qwen3-30B-A3B-Instruct-2507**, with **4-bit NF4**, double
-quantization, FP16 compute and SDPA. This checkpoint is non-thinking by design.
-The generator is split across **both T4 GPUs**, with an **11 GiB weight-placement
-budget per GPU** (`llm_max_memory`) to leave room for generation and the encoder
-classifier on **cuda:1**; SVM uses **CPU**. These caps are not peak-VRAM limits.
-Run one notebook at a time. Neither model is trained again.
+The rerun uses the official **Qwen/Qwen3-14B** checkpoint, quantized to **4-bit
+NF4** with double quantization, FP16 compute, SDPA and thinking disabled.
+The generator runs on **cuda:0** and the encoder classifier on **cuda:1**;
+SVM uses **CPU**. Run one notebook at a time. Neither model is trained again.
+The original weight files total approximately **27.51 GiB**; they are downloaded
+before quantization. This is disk usage, not the quantized model's VRAM footprint.
+Caches and the Python environment require additional disk space.
 
-The `attacks` dependency group pins Transformers **4.57.6** and Datasets **4.4.1**.
-Transformers 5's fused MoE expert parameters are not quantized by the currently
-locked bitsandbytes integration; merely enabling 4-bit would leave those experts
-in FP16. The older loader retains quantizable Linear experts. The default
-`runtime` group retains the existing training/judge dependencies. Both groups are
-locked in `uv.lock`; the attack notebooks select their group automatically.
-See the [upstream issue](https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1849).
+The notebooks set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before starting
+the attack process to reduce CUDA allocator fragmentation during loading.
+After a failed 30B attempt, stop the old process and remove its cached weights or
+start a fresh Kaggle session before downloading the 14B checkpoint. Restarting
+only the notebook kernel does not remove cached weight files.
 
 Each notebook samples **10 correctly classified validation examples per label**
 (30 per classifier) with seed 42, shared across its modes and beam widths. Eligibility is
@@ -285,7 +283,7 @@ The query-budget landmarks 10/50/100 and width 5 follow
 [TREPAT, EMNLP 2025, Sections 3.4–4](https://aclanthology.org/2025.emnlp-main.1405.pdf).
 The denser Q/G checkpoints, widths 1/3, five candidates per call, and the per-step
 edit/span limits are pilot choices.
-Sampling follows the [Qwen3-30B-A3B-Instruct-2507 model card](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507).
+Sampling follows [Qwen3-14B non-thinking guidance](https://huggingface.co/Qwen/Qwen3-14B).
 The rerun's Q/G maximum of 25 and ten sources per label are project choices.
 
 Local CPU-only search checks live in the ignored `tests/` directory. If available, run:
@@ -293,15 +291,6 @@ Local CPU-only search checks live in the ignored `tests/` directory. If availabl
 ```bash
 PYTHONPATH=src uv run --no-sync python -m unittest discover -s tests -v
 ```
-
-To run attack checks in the same environment as Kaggle, first sync the attacks
-group, then select it explicitly:
-
-```bash
-UV_PROJECT_ENVIRONMENT=.venv-attacks uv sync --locked --no-default-groups --group attacks --python 3.12
-UV_PROJECT_ENVIRONMENT=.venv-attacks PYTHONPATH=src uv run --no-sync --no-default-groups --group attacks python -m unittest discover -s tests -p 'test_attack*.py' -v
-```
-
 
 ## LLM judges on Kaggle
 

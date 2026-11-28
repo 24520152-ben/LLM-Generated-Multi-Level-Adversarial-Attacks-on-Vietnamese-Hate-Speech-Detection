@@ -9,9 +9,9 @@ class AttackConfig:
     """Validation settings; Q/G budgets share one trajectory per beam width."""
 
     checkpoint_dir: str | Path
-    llm_checkpoint: str = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+    llm_checkpoint: str = "Qwen/Qwen3-14B"
     llm_revision: str | None = None
-    llm_max_memory: tuple[str, ...] = ("11GiB", "11GiB")
+    llm_device: str = "cuda:0"
     classifier_device: str = "cuda:1"
     query_budgets: tuple[int, ...] = tuple(range(1, 26))
     generation_budgets: tuple[int, ...] = tuple(range(5, 26, 5))
@@ -21,7 +21,7 @@ class AttackConfig:
     seed: int = 42
     candidates_per_call: int = 5
     max_new_tokens: int = 2048
-    # Recommended sampling settings for Qwen3-30B-A3B-Instruct-2507.
+    # Qwen3's recommended non-thinking sampling settings.
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
@@ -35,8 +35,6 @@ class AttackConfig:
 
     def __post_init__(self) -> None:
         """Reject empty grids, invalid modes, and nonpositive pilot settings."""
-        if not self.llm_max_memory or any(not value for value in self.llm_max_memory):
-            raise ValueError("llm_max_memory must specify a memory budget per GPU")
         for name in ("query_budgets", "generation_budgets", "beam_widths"):
             values = getattr(self, name)
             if (
