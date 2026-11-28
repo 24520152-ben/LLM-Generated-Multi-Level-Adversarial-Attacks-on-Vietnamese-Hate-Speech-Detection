@@ -29,7 +29,7 @@ def _hf_token() -> str | None:
         from kaggle_secrets import UserSecretsClient  # type: ignore
 
         return UserSecretsClient().get_secret("HF_TOKEN")
-    except Exception:
+    except Exception:  # noqa: BLE001 - Kaggle raises backend-specific secret errors.
         # The dataset may be public or the user may already be logged in.
         return None
 

@@ -1,8 +1,8 @@
 # ViHSD Baselines and Adversarial Attacks
 
-[Research proposal](project_proposal.md) — updated 26 November 2026.
+[Research proposal](project_proposal.md) — updated 28 November 2026.
 Four clean baselines have completed one run each (seed 42). Validation attack
-pilot outputs are available for ViSoBERT and XLM-R; candidates are not annotated yet.
+pilot outputs are available for all four classifiers; candidates are not annotated yet.
 
 ## Baseline results
 
@@ -207,43 +207,45 @@ results do not overwrite one another. A direct `run_pilot()` call without an
 `output_dir` still defaults to `artifacts/attacks/`. Rerunning a model's pilot
 replaces its two CSV files at the same paths:
 
-- **`candidates.csv`** has 9 columns: `id`, `mode`, `beam_width`, `query`,
-  `parent_query`, `step_mode`, `candidate`, `prediction`, `status`.
-  It keeps proposals and rejection reasons for reviewing the pilot filters, and
-  all scored candidates for reconstructing ASR at each budget. `parent_query`
-  references an earlier scored candidate in the same example/mode/beam search;
-  zero means the original comment. `step_mode` and these links reconstruct the
-  edit sequence without repeating parent text or storing a separate path.
-  Empty query numbers mean the candidate was not scored. Valid `[]` (including
-  a JSON code fence) marks every requested position `missing`. Unparseable output,
-  an empty response, or JSON whose top level is not an array marks the first
-  position `invalid_output`, retaining raw text there; other positions are
-  `missing`. Invalid individual array entries, such as `""` or `null`, are `format`.
-  Empty/invalid positions consume G without a classifier query; valid strings
-  elsewhere in a partially populated array are still processed normally.
-- **`results.csv`** has 12 columns: `id`, `mode`, `beam_width`, `original`, `label`,
-  `query_budget`, `generation_budget`, `queries_used`, `auto_success`, `llm_calls`,
-  `cache_hits`, `seconds`. One row represents an example/mode/beam/Q/G, including failed searches.
-  Original text and gold labels are stored here; match by `id` to inspect a
-  candidate against its source. Predictions remain in the candidate file rather
-  than being copied into results. `llm_calls` counts actual model inference calls;
-  `cache_hits` counts reused responses in the joint Q/G prefix. Their sum is the
-  number of generation requests, including failed responses before the prefix ends.
-  Existing CSVs from runs before caching have no `cache_hits` column and their
-  `llm_calls` are all actual inference calls. `seconds` describes
-  the entire shared search and is filled only on its largest Q/G row; other
-  budget pairs leave it empty. `queries_used` below
-  the budget means the search stopped before reaching that query budget, either
-  because no new candidates were scored or the generation-slot cap was reached.
-  To reconstruct a pair's scored candidate pool, match `id`, `mode`, `beam_width`
-  and select `status=scored` with `query <= queries_used`, rather than just Q.
-  Thus the candidate CSV stores one trajectory without adding a G column.
+- **`candidates.csv`** has 12 columns: `source_id`, `original`, `original_label`,
+  `parent`, `candidate`, `predicted_label`, `mode`, `step_mode`, `beam_width`,
+  `query`, `generation_used`, `status`. Each row is a proposal or an invalid/missing
+  output position. Original text, gold label and parent text are included so a
+  row can be reviewed without joining another file. `predicted_label` is the
+  classifier's prediction for the variant. It and `query` are empty when the
+  candidate was not scored. `query` numbers restart for each source/mode/beam
+  search; `generation_used` counts cumulative requested slots at the generating
+  call, including filtered, missing and cached positions. Candidates from the
+  same call share that value. To recover a scored pool for Q/G, match source,
+  mode and beam, then filter `status=scored`, `query <= Q` and
+  `generation_used <= G`. Parent text links to the original or an earlier scored
+  candidate in the same search, allowing the complete edit path to be rebuilt.
+  Status values are `scored`, `format`, `mode`, `duplicate`, `missing`,
+  `invalid_output`, `extra`, and `unscored`. A valid empty array produces
+  `missing` positions; malformed/empty/non-array output produces one
+  `invalid_output` row retaining the raw response, followed by `missing` rows.
+  Invalid array entries are `format`. None of these rejected positions consumes
+  a classifier query. Excess items are `extra` and add neither Q nor G;
+  `unscored` means a usable candidate could not be scored within the remaining Q.
+- **`results.csv`** has 10 columns: `mode`, `beam_width`, `query_budget`,
+  `generation_budget`, `samples`, `flips`, `queries`, `llm_calls`, `cache_hits`,
+  `seconds`. Each row aggregates the completed source searches for one
+  mode/beam/Q/G configuration, including failures in `samples`. `flips` counts
+  sources with at least one classifier prediction flip, pending validity review;
+  it does not count variants. `queries`, `llm_calls` and `cache_hits` are totals
+  across those sources. Calls are actual LLM inferences; hits are reused
+  responses. `seconds` sums full-trajectory runtime and is filled only at the
+  largest Q/G pair. Costs from different budget rows must not be added together:
+  they describe overlapping prefixes of the same searches. The file is refreshed
+  after each completed search, with `samples` showing its current denominator.
+  The default grid has 24,000 aggregate rows per model, rather than 360,000
+  source-level rows. All four existing model outputs have been converted without
+  rerunning inference; generation positions were recovered from five-slot call
+  boundaries and checked against the original Q/G snapshots.
 
 Margins are used in memory to rank the beam and can be recomputed from the saved
-classifier checkpoint. Candidate rows do not store margins or LLM call numbers.
-
-`auto_success` is a classifier prediction flip, pending human validation. Review
-all scored flips when checking whether a search found any valid adversarial example.
+classifier checkpoint. Review all scored prediction flips when checking whether
+a search found any valid adversarial example.
 
 The final adversarial test set will retain **every distinct, validated successful
 variant** within the test configurations and budgets fixed on validation. If one
@@ -256,9 +258,9 @@ each source contributes total weight one across its variants, with the original
 retained when no valid successful variant exists. These are construction and
 evaluation rules; annotation and final dataset export are not implemented yet.
 
-Existing ViSoBERT/XLM-R pilot CSVs were generated on Kaggle before request caching.
-The cache-enabled generator still needs a timed T4 run. Pilot outputs need human
-review before they can support valid attack-success claims.
+Current pilot CSVs for all four classifiers include request-cache accounting.
+Earlier uncached outputs used a different prompt and are not a controlled timing
+comparison. Pilot outputs need human review before supporting valid attack-success claims.
 Keep the notebook options and source revision with the experiment when reporting
 results. Choose the shared configuration on validation before attacking test.
 

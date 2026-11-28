@@ -14,11 +14,10 @@ from vihsd_attack.data import Example
 
 @dataclass
 class Candidate:
-    """One beam state, referenced by its classifier query number."""
+    """One beam state and its score relative to the source label."""
 
     text: str
     margin: float
-    query: int = 0
 
 
 def margin(scores: list[float], label: int) -> float:
@@ -96,10 +95,11 @@ def beam_search(
                 text = value.strip() if isinstance(value, str) else ""
                 row = {
                     "step_mode": step_mode,
-                    "parent_query": parent.query,
+                    "parent": parent.text,
                     "candidate": text,
                     "query": "",
-                    "prediction": "",
+                    "generation_used": slots_used,
+                    "predicted_label": "",
                 }
                 if slot >= count:
                     status = "extra"
@@ -132,9 +132,9 @@ def beam_search(
                 row.update(
                     status="scored",
                     query=queries,
-                    prediction=LABELS[predicted],
+                    predicted_label=LABELS[predicted],
                 )
-                children.append(Candidate(row["candidate"], value, queries))
+                children.append(Candidate(row["candidate"], value))
                 scored.append(row)
                 calls_at_query.append(calls)
             queries_at_call.append(queries)
@@ -143,7 +143,11 @@ def beam_search(
         round_id += 1
     elapsed = perf_counter() - started
     first_success = next(
-        (row["query"] for row in scored if row["prediction"] != LABELS[example.label]),
+        (
+            row["query"]
+            for row in scored
+            if row["predicted_label"] != LABELS[example.label]
+        ),
         math.inf,
     )
     results = []

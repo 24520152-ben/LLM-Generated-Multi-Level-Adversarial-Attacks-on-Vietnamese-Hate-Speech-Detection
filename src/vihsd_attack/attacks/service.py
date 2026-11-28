@@ -16,6 +16,33 @@ from vihsd_attack.classifiers.service import _hf_token, load_classifier
 from vihsd_attack.config import LABELS, default_artifact_root
 from vihsd_attack.data import load_vihsd
 
+CANDIDATE_FIELDS = [
+    "source_id",
+    "original",
+    "original_label",
+    "parent",
+    "candidate",
+    "predicted_label",
+    "mode",
+    "step_mode",
+    "beam_width",
+    "query",
+    "generation_used",
+    "status",
+]
+RESULT_FIELDS = [
+    "mode",
+    "beam_width",
+    "query_budget",
+    "generation_budget",
+    "samples",
+    "flips",
+    "queries",
+    "llm_calls",
+    "cache_hits",
+    "seconds",
+]
+
 
 def run_pilot(config: AttackConfig) -> Path:
     """Evaluate beam widths on one stratified set of eligible validation rows.
@@ -67,29 +94,10 @@ def run_pilot(config: AttackConfig) -> Path:
         else default_artifact_root() / "attacks"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    context_fields = ["id", "mode", "beam_width"]
-    candidate_fields = context_fields + [
-        "query",
-        "parent_query",
-        "step_mode",
-        "candidate",
-        "prediction",
-        "status",
-    ]
-    result_fields = context_fields + [
-        "original",
-        "label",
-        "query_budget",
-        "generation_budget",
-        "queries_used",
-        "auto_success",
-        "llm_calls",
-        "cache_hits",
-        "seconds",
-    ]
     print(f"Saving pilot to {output_dir}", flush=True)
     total = len(sample) * len(config.modes) * len(config.beam_widths)
     successes = defaultdict(int)
+    summaries = {}
     llm_calls = cache_hits = 0
     with (
         (output_dir / "candidates.csv").open(
@@ -98,15 +106,17 @@ def run_pilot(config: AttackConfig) -> Path:
         (output_dir / "results.csv").open("w", encoding="utf-8", newline="") as results,
         tqdm(total=total, desc="Attack searches") as progress,
     ):
-        candidate_writer = csv.DictWriter(candidates, candidate_fields)
-        result_writer = csv.DictWriter(results, result_fields)
+        candidate_writer = csv.DictWriter(candidates, CANDIDATE_FIELDS)
+        result_writer = csv.DictWriter(results, RESULT_FIELDS)
         candidate_writer.writeheader()
         result_writer.writeheader()
         for (example, scores), mode, width in product(
             sample, config.modes, config.beam_widths
         ):
             context = {
-                "id": example.id,
+                "source_id": example.id,
+                "original": example.text,
+                "original_label": LABELS[example.label],
                 "mode": mode,
                 "beam_width": width,
             }
@@ -121,12 +131,37 @@ def run_pilot(config: AttackConfig) -> Path:
                 width,
             )
             candidate_writer.writerows({**context, **row} for row in events)
-            source = {
-                **context,
-                "original": example.text,
-                "label": LABELS[example.label],
-            }
-            result_writer.writerows({**source, **row} for row in snapshots)
+            for row in snapshots:
+                key = (mode, width, row["query_budget"], row["generation_budget"])
+                summary = summaries.setdefault(
+                    key,
+                    {
+                        "mode": mode,
+                        "beam_width": width,
+                        "query_budget": row["query_budget"],
+                        "generation_budget": row["generation_budget"],
+                        "samples": 0,
+                        "flips": 0,
+                        "queries": 0,
+                        "llm_calls": 0,
+                        "cache_hits": 0,
+                        "seconds": "",
+                    },
+                )
+                summary["samples"] += 1
+                summary["flips"] += row["auto_success"]
+                summary["queries"] += row["queries_used"]
+                summary["llm_calls"] += row["llm_calls"]
+                summary["cache_hits"] += row["cache_hits"]
+                if row["seconds"] != "":
+                    summary["seconds"] = round(
+                        (summary["seconds"] or 0) + row["seconds"], 3
+                    )
+            # Persist completed searches, including partial pilot denominators.
+            results.seek(0)
+            results.truncate()
+            result_writer.writeheader()
+            result_writer.writerows(summaries.values())
             successes[mode, width] += snapshots[-1]["auto_success"]
             llm_calls += snapshots[-1]["llm_calls"]
             cache_hits += snapshots[-1]["cache_hits"]
