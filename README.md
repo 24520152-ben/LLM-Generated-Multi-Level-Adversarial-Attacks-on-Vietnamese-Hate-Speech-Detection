@@ -2,7 +2,8 @@
 
 [Research proposal](project_proposal.md) — updated 28 November 2026.
 Four clean baselines have completed one run each (seed 42). Validation attack
-pilot outputs are available for all four classifiers; candidates are not annotated yet.
+pilot outputs are available for all four classifiers. The LLM-judge stage is implemented;
+no judge or human annotation results are available yet.
 
 ## Baseline results
 
@@ -275,3 +276,102 @@ Local CPU-only search checks live in the ignored `tests/` directory. If availabl
 ```bash
 PYTHONPATH=src uv run --no-sync python -m unittest discover -s tests -v
 ```
+
+
+## LLM judges on Kaggle
+
+Only **prediction-flipping** candidates enter this stage. Prepare the portable
+input file locally after downloading the four attack outputs:
+
+```bash
+PYTHONPATH=src uv run python -c 'from vihsd_attack.judges.data import prepare_inputs; prepare_inputs("artifacts/attacks")'
+```
+
+This writes `artifacts/judges/judge_inputs.csv`. The current pilot contains
+**1,570 distinct source/variant pairs and 1,773 distinct edit paths**. Paths include
+non-flipping ancestors as context; those ancestors are not separate annotation
+samples. Paths shared across classifiers/beam widths are judged once. Attack
+provenance remains in the candidate CSVs. Different paths to one variant remain separate
+because mode validity depends on the complete chain, especially for MIX.
+This export uses all saved pilot searches; lock the source runs/configurations
+before using the same procedure for a final test dataset.
+
+Upload **that one CSV** as a Kaggle Dataset, attach it, and open
+[scripts/judge.ipynb](scripts/judge.ipynb) with **T4 x2** and Internet enabled.
+The notebook finds the unique `judge_inputs.csv` under `/kaggle/input`, or accepts
+an explicit `INPUT_CSV`. It clones the repository and runs `uv sync --locked`
+using the same isolated Python 3.12 workflow as the other notebooks. No classifier
+checkpoint is needed. A fresh session clones newer source; existing clones must
+be updated before running newly committed code.
+
+| Stage | Checkpoint | Quantization | Default device |
+|---|---|---|---|
+| Independent judge 1 | `Qwen/Qwen3.5-9B` | 8-bit | `cuda:0` |
+| Independent judge 2 | `aisingapore/Llama-SEA-LION-v3.5-8B-R` | 8-bit | `cuda:1` |
+| Disagreement/uncertainty judge | `google/gemma-4-12B-it` | 4-bit NF4 | `cuda:0` |
+
+The first two judges run in separate processes. After both exit, Gemma judges
+only disagreements, `UNSURE` answers or malformed/overlong first-stage inputs.
+Gemma does not see the first-stage answers. All models use text-only inputs,
+FP16 computation, SDPA and thinking disabled. Greedy decoding, 128 output tokens
+and an 8,192 input-token guard are implementation defaults, not validated optimal
+settings. Overlong inputs stay unresolved; comments and paths are never silently
+truncated. The three quantized checkpoints still need an end-to-end T4 run.
+
+Settings are in `src/vihsd_attack/judges/config.py` and prompts in
+`src/vihsd_attack/judges/constants.py`. Judges return the final label and one
+combined assessment of meaning preservation and mode compliance of every step.
+They see neither gold source labels, classifier predictions, attack model names
+nor other judges' answers. Code then compares the judge's label with the source
+label: final `valid=YES` requires meaning, mode and label preservation together.
+A definite failure gives `NO`; uncertainty, malformed JSON or an overlong input
+stays `UNSURE`. Benchmark support for Vietnamese does not establish judge accuracy;
+calibrate against independent human annotations before trusting these results.
+
+Outputs stay flat under `artifacts/judges/`:
+
+- `judge_inputs.csv` has five columns: `source_id`, `original`, `original_label`,
+  `candidate`, `path`. It contains no generated ID or attack-provenance JSON.
+  `path` is one readable line, for example
+  `1. [W] intermediate comment -> 2. [S] final variant`.
+  Each numbered step records the requested mode and resulting text. Literal
+  newlines/backslashes inside comments are escaped; an arrow belonging to the
+  comment itself is written `\->`, so it cannot be mistaken for a step separator.
+- **All four outputs** (`qwen.csv`, `sealion.csv`, `gemma.csv`, `suggestions.csv`)
+  share seven columns: the five input columns followed by `candidate_label` and
+  `valid`. They can each be read independently. `candidate_label` is the
+  individual judge's label in the first three files and the consensus label in
+  `suggestions.csv`; it is not a victim classifier prediction. `valid` is `YES`,
+  `NO` or `UNSURE`. No separate meaning/mode scores, processing statuses,
+  explanations or accept/reject columns are saved.
+
+Gemma is called if either the candidate label or validity disagrees, or either
+is `UNSURE`. Final label and validity each require two matching non-uncertain
+votes; failure to reach that threshold stays `UNSURE`. Both failed responses and
+genuine uncertainty are unresolved votes. No path is removed, including `valid=NO`.
+These are **LLM suggestions, not final human labels**. Do not label a whole variant
+valid in every condition because one path was accepted. Give each annotator a
+separate working copy: rerunning the merge replaces `suggestions.csv` without
+rerunning model inference. With merged validity, these files do not identify
+whether an invalid path failed on meaning or edit level.
+
+Files are joined by **`source_id` + `path`**, including when judge row orders differ.
+Source text and labels are also checked when reading saved votes. Source IDs link
+back to the candidate CSVs; complete paths distinguish different routes to the
+same variant when recovering classifier/mode/beam/Q/G provenance. No generated
+IDs, revision/signature columns or metadata files are written.
+Judges use greedy decoding, so there is no judge sampling-seed setting.
+
+Every completed verdict is flushed to its judge CSV, including failures. Reruns
+skip saved source/path pairs. To resume in a new
+Kaggle session, restore those CSVs into `OUTPUT_DIR` alongside the same input CSV.
+Changing prompts/settings requires a different output directory or explicitly
+removing the old judge outputs. One process may write each judge CSV at a time.
+Human verification, adjudication and final test-set export remain separate work;
+two independent human reviews, with a third adjudicator for disagreements, are
+planned. Human initial labels should be recorded before revealing LLM suggestions.
+
+Model interfaces follow the official cards:
+[Qwen3.5](https://huggingface.co/Qwen/Qwen3.5-9B),
+[SEA-LION](https://huggingface.co/aisingapore/Llama-SEA-LION-v3.5-8B-R),
+and [Gemma 4](https://huggingface.co/google/gemma-4-12B-it).
