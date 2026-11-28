@@ -85,7 +85,7 @@ def run_pilot(config: AttackConfig) -> Path:
     rng.shuffle(sample)
     counts = {LABELS[label]: len(rows) for label, rows in eligible.items()}
     print(
-        f"Pilot: {len(sample)} validation rows; eligible counts: {counts}", flush=True
+        f"Attack validation: {len(sample)} rows; eligible counts: {counts}", flush=True
     )
     generator = CandidateGenerator(config, token=token)
     output_dir = (
@@ -94,7 +94,7 @@ def run_pilot(config: AttackConfig) -> Path:
         else default_artifact_root() / "attacks"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Saving pilot to {output_dir}", flush=True)
+    print(f"Saving attacks to {output_dir}", flush=True)
     total = len(sample) * len(config.modes) * len(config.beam_widths)
     successes = defaultdict(int)
     summaries = {}
@@ -176,5 +176,5 @@ def run_pilot(config: AttackConfig) -> Path:
             flush=True,
         )
     print(f"LLM: {llm_calls} model calls, {cache_hits} cache hits", flush=True)
-    print(f"Saved pilot: {output_dir}", flush=True)
+    print(f"Saved attacks: {output_dir}", flush=True)
     return output_dir

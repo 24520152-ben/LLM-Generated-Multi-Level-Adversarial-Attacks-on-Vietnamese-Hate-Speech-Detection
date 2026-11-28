@@ -1,4 +1,4 @@
-"""LLM generation, beam search, and validation pilot settings."""
+"""LLM generation, beam search, and validation attack settings."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,22 +6,22 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class AttackConfig:
-    """Pilot settings; Q/G budgets share one search trajectory per beam width."""
+    """Validation settings; Q/G budgets share one trajectory per beam width."""
 
     checkpoint_dir: str | Path
-    llm_checkpoint: str = "Qwen/Qwen3-8B"
+    llm_checkpoint: str = "Qwen/Qwen3-30B-A3B-Instruct-2507"
     llm_revision: str | None = None
-    llm_device: str = "cuda:0"
+    llm_max_memory: tuple[str, ...] = ("11GiB", "11GiB")
     classifier_device: str = "cuda:1"
-    query_budgets: tuple[int, ...] = tuple(range(1, 101))
-    generation_budgets: tuple[int, ...] = tuple(range(5, 101, 5))
+    query_budgets: tuple[int, ...] = tuple(range(1, 26))
+    generation_budgets: tuple[int, ...] = tuple(range(5, 26, 5))
     beam_widths: tuple[int, ...] = (1, 3, 5)
     modes: tuple[str, ...] = ("C", "W", "S", "MIX")
-    sample_per_label: int = 5
+    sample_per_label: int = 10
     seed: int = 42
     candidates_per_call: int = 5
     max_new_tokens: int = 2048
-    # Qwen3's recommended non-thinking sampling settings.
+    # Recommended sampling settings for Qwen3-30B-A3B-Instruct-2507.
     temperature: float = 0.7
     top_p: float = 0.8
     top_k: int = 20
@@ -35,6 +35,8 @@ class AttackConfig:
 
     def __post_init__(self) -> None:
         """Reject empty grids, invalid modes, and nonpositive pilot settings."""
+        if not self.llm_max_memory or any(not value for value in self.llm_max_memory):
+            raise ValueError("llm_max_memory must specify a memory budget per GPU")
         for name in ("query_budgets", "generation_budgets", "beam_widths"):
             values = getattr(self, name)
             if (

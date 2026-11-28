@@ -79,40 +79,54 @@ To regenerate per-example predictions, load `checkpoint/` with
 `load_classifier()` and call `predict()` on texts from the original dataset
 snapshot and split.
 
-## Attack pilot on Kaggle
+## Rerun validation attacks on Kaggle
 
 Attack settings are in `src/vihsd_attack/attacks/config.py`; shared labels and
 artifact location remain in `src/vihsd_attack/config.py`.
 
-Open the matching pilot notebook with a **T4 x2** kernel:
+Open the matching attack notebook with a **T4 x2** kernel:
 
 | Classifier | Notebook | Output directory |
 |---|---|---|
-| SVM | [pilot_svm.ipynb](scripts/pilot_svm.ipynb) | `artifacts/attacks/svm/` |
-| PhoBERT | [pilot_phobert.ipynb](scripts/pilot_phobert.ipynb) | `artifacts/attacks/phobert/` |
-| ViSoBERT | [pilot_visobert.ipynb](scripts/pilot_visobert.ipynb) | `artifacts/attacks/visobert/` |
-| XLM-R | [pilot_xlmr.ipynb](scripts/pilot_xlmr.ipynb) | `artifacts/attacks/xlmr/` |
+| SVM | [attack_validation_svm.ipynb](scripts/attack_validation_svm.ipynb) | `artifacts/attacks/svm/` |
+| PhoBERT | [attack_validation_phobert.ipynb](scripts/attack_validation_phobert.ipynb) | `artifacts/attacks/phobert/` |
+| ViSoBERT | [attack_validation_visobert.ipynb](scripts/attack_validation_visobert.ipynb) | `artifacts/attacks/visobert/` |
+| XLM-R | [attack_validation_xlmr.ipynb](scripts/attack_validation_xlmr.ipynb) | `artifacts/attacks/xlmr/` |
 
 Each notebook points to its checkpoint under
 `/kaggle/input/datasets/hophamsailam/vihsd-baselines/baselines/`.
 Attach that dataset to the Kaggle notebook. The checkpoint directory must include
 the saved preprocessing settings (or `model.joblib` and `baseline.json` for SVM).
-The notebook clones and runs `uv sync --locked --python 3.12` just like training.
+The notebook clones and runs `uv sync --locked --python 3.12 --no-default-groups --group attacks`
+in `.venv-attacks`.
 It reuses an existing checkout; use a fresh session or update that checkout first.
 
-Qwen3-8B runs in **8-bit on cuda:0**, with FP16 computation and thinking disabled.
-The encoder classifier uses **cuda:1**; SVM uses **CPU**. This is inference;
-neither model is trained again. Run one pilot at a time in a shared GPU session.
-Each notebook samples **5 correctly classified validation examples per label**
-(15 per classifier), shared across its modes and beam widths. Eligibility is
-classifier-specific, so the sampled source IDs can differ between classifiers.
-This small pilot checks output quality and runtime and compares configurations
-preliminarily; expand validation before making final configuration choices.
+The rerun uses **Qwen/Qwen3-30B-A3B-Instruct-2507**, with **4-bit NF4**, double
+quantization, FP16 compute and SDPA. This checkpoint is non-thinking by design.
+The generator is split across **both T4 GPUs**, with an **11 GiB weight-placement
+budget per GPU** (`llm_max_memory`) to leave room for generation and the encoder
+classifier on **cuda:1**; SVM uses **CPU**. These caps are not peak-VRAM limits.
+Run one notebook at a time. Neither model is trained again.
 
-The default grid uses beam widths **1, 3, 5**, **Q=1–100 in steps of 1**, and
-**G=5–100 in steps of 5** (`query_budgets` and `generation_budgets`). Each
-example/mode/beam combination runs **once up to Q=100 and G=100**; its history
-provides all 2,000 Q/G result rows without repeating generation or scoring.
+The `attacks` dependency group pins Transformers **4.57.6** and Datasets **4.4.1**.
+Transformers 5's fused MoE expert parameters are not quantized by the currently
+locked bitsandbytes integration; merely enabling 4-bit would leave those experts
+in FP16. The older loader retains quantizable Linear experts. The default
+`runtime` group retains the existing training/judge dependencies. Both groups are
+locked in `uv.lock`; the attack notebooks select their group automatically.
+See the [upstream issue](https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1849).
+
+Each notebook samples **10 correctly classified validation examples per label**
+(30 per classifier) with seed 42, shared across its modes and beam widths. Eligibility is
+classifier-specific, so the sampled source IDs can differ between classifiers.
+This reruns the validation experiments with the new generator; it does not attack
+test. Existing results below describe the earlier Qwen3-8B run, not this rerun.
+
+The default grid uses beam widths **1, 3, 5**, **Q=1–25 in steps of 1**, and
+**G=5–25 in steps of 5** (`query_budgets` and `generation_budgets`). Each
+example/mode/beam combination runs **once up to Q=25 and G=25**; its history
+provides all 125 Q/G snapshots without repeating generation or scoring.
+There are **360 searches per classifier** (30 sources × 4 modes × 3 beam widths).
 Proposal order, per-call seeds, and prompts do not depend on lower checkpoints.
 Eligibility scoring is a separate
 preparation step, outside the attack query budget. A batch of five candidates
@@ -122,7 +136,7 @@ The maximum of `generation_budgets` caps requested generation slots, shared
 across all parents and, in MIX, all three generation modes. Each call consumes
 its requested number of candidates before filtering, even for duplicates,
 rejected candidates, missing entries or malformed responses. With five slots
-per call, G=100 permits at most **20 generation requests per search**, including
+per call, G=25 permits at most **5 generation requests per search**, including
 cache hits. Intermediate G values
 must be multiples of `candidates_per_call` so that their prefixes keep identical
 generation requests. Only the largest G may end with a partial call, requesting
@@ -206,7 +220,7 @@ generation but does not certify candidate validity.
 
 The four notebooks save to `artifacts/attacks/<model>/` via `output_dir`, so their
 results do not overwrite one another. A direct `run_pilot()` call without an
-`output_dir` still defaults to `artifacts/attacks/`. Rerunning a model's pilot
+`output_dir` still defaults to `artifacts/attacks/`. Rerunning a model's attack
 replaces its two CSV files at the same paths:
 
 - **`candidates.csv`** has 12 columns: `source_id`, `original`, `original_label`,
@@ -240,8 +254,8 @@ replaces its two CSV files at the same paths:
   largest Q/G pair. Costs from different budget rows must not be added together:
   they describe overlapping prefixes of the same searches. The file is refreshed
   after each completed search, with `samples` showing its current denominator.
-  The default grid has 24,000 aggregate rows per model, rather than 360,000
-  source-level rows. All four existing model outputs have been converted without
+  The rerun grid has 1,500 aggregate rows per model. The earlier Q/G=100 grid
+  produced 24,000 rows per model. All four existing model outputs were converted without
   rerunning inference; generation positions were recovered from five-slot call
   boundaries and checked against the original Q/G snapshots.
 
@@ -271,12 +285,21 @@ The query-budget landmarks 10/50/100 and width 5 follow
 [TREPAT, EMNLP 2025, Sections 3.4–4](https://aclanthology.org/2025.emnlp-main.1405.pdf).
 The denser Q/G checkpoints, widths 1/3, five candidates per call, and the per-step
 edit/span limits are pilot choices.
-Sampling follows [Qwen3's non-thinking guidance](https://huggingface.co/Qwen/Qwen3-8B).
+Sampling follows the [Qwen3-30B-A3B-Instruct-2507 model card](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507).
+The rerun's Q/G maximum of 25 and ten sources per label are project choices.
 
 Local CPU-only search checks live in the ignored `tests/` directory. If available, run:
 
 ```bash
 PYTHONPATH=src uv run --no-sync python -m unittest discover -s tests -v
+```
+
+To run attack checks in the same environment as Kaggle, first sync the attacks
+group, then select it explicitly:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-attacks uv sync --locked --no-default-groups --group attacks --python 3.12
+UV_PROJECT_ENVIRONMENT=.venv-attacks PYTHONPATH=src uv run --no-sync --no-default-groups --group attacks python -m unittest discover -s tests -p 'test_attack*.py' -v
 ```
 
 

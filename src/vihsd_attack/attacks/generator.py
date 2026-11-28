@@ -1,4 +1,4 @@
-"""Qwen3 inference on one GPU with 8-bit weights and thinking disabled."""
+"""Qwen3 MoE inference with NF4 weights split across CUDA GPUs."""
 
 import json
 from dataclasses import dataclass
@@ -24,18 +24,32 @@ class Generation:
 
 class CandidateGenerator:
     def __init__(self, config: AttackConfig, token: str | None = None):
-        """Load Qwen on the requested CUDA device using LLM.int8().
+        """Load Qwen in NF4 with GPU memory reserved for generation/classification.
 
         Args:
             config: Model, device, and generation settings.
             token: Optional Hugging Face read token.
         """
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from transformers import (
+            AutoModelForCausalLM,
+            AutoTokenizer,
+            BitsAndBytesConfig,
+            __version__,
+        )
 
-        device = torch.device(config.llm_device)
-        if device.type != "cuda" or not torch.cuda.is_available():
-            raise ValueError("8-bit generation requires an available CUDA GPU")
+        if __version__ != "4.57.6":
+            raise RuntimeError(
+                "Run attacks with uv sync --locked --no-default-groups --group attacks "
+                "(Transformers 4.57.6 is required to quantize MoE experts)."
+            )
+        if not torch.cuda.is_available() or torch.cuda.device_count() < len(
+            config.llm_max_memory
+        ):
+            raise ValueError(
+                "Generation requires one CUDA GPU per llm_max_memory entry "
+                "(two by default)"
+            )
         self.config = config
         self._cache: dict[tuple, str] = {}
         self._cache_original: str | None = None
@@ -43,13 +57,23 @@ class CandidateGenerator:
         self.tokenizer = AutoTokenizer.from_pretrained(config.llm_checkpoint, **options)
         self.model = AutoModelForCausalLM.from_pretrained(
             config.llm_checkpoint,
-            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            device_map={"": str(device)},
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            ),
+            device_map="auto",
+            max_memory=dict(enumerate(config.llm_max_memory)),
             dtype=torch.float16,
             attn_implementation="sdpa",
             **options,
         ).eval()
-        print(f"Generator: {config.llm_checkpoint}, 8-bit on {device}", flush=True)
+        print(
+            f"Generator: {config.llm_checkpoint}, 4-bit NF4; "
+            f"devices: {set(self.model.hf_device_map.values())}",
+            flush=True,
+        )
 
     def generate(
         self,
@@ -116,7 +140,6 @@ class CandidateGenerator:
                 return_dict=True,
                 return_tensors="pt",
                 add_generation_prompt=True,
-                enable_thinking=False,
             ).to(self.model.device)
             set_seed(seed)
             with torch.inference_mode():
