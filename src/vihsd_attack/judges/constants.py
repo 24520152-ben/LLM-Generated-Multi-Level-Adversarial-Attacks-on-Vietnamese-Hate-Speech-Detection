@@ -31,12 +31,14 @@ valid chỉ nhận YES, NO, UNSURE. Không giải thích hoặc thêm trường 
 JUDGE_USER_PROMPT = """Quy tắc cấp độ cho mỗi bước:
 - C: 1–{max_char_edits} thao tác chèn/xóa/thay grapheme trên toàn câu; đảo hai
 ký tự khác nhau tính 2 thao tác. Phần không sửa giữ nguyên; vẫn nhận ra cùng từ.
-Không chấp nhận thay từ mang nghĩa khác chỉ vì khoảng cách ký tự nhỏ.
+Không chấp nhận đổi sang từ khác, kể cả từ đồng nghĩa, chỉ vì khoảng cách ký tự nhỏ.
 - W: Từ/cụm từ gần nghĩa trong ngữ cảnh, giữ cấu trúc phần còn lại; tối đa
 {max_word_spans} vùng diff, mỗi bên mỗi vùng tối đa {max_span_tokens} khối chữ/số.
 Không nhận lỗi gõ hoặc thay đổi nội dung là thay từ đồng nghĩa.
-- S: Có viết lại cách diễn đạt/cấu trúc cú pháp ở cấp câu; không chỉ lỗi gõ,
-đổi dấu câu, thêm từ đệm hay thay một từ. Trường hợp ranh giới mơ hồ dùng UNSURE.
+- S: Có tổ chức lại câu, như đổi thứ tự mệnh đề/thành phần hoặc dùng cấu trúc
+tương đương. Không chỉ lỗi gõ, đổi dấu câu, thêm từ đệm hay thay một/vài từ
+đồng nghĩa. Không thêm quan hệ nguyên nhân/kết quả chưa có trong câu gốc.
+Trường hợp ranh giới mơ hồ dùng UNSURE.
 
 path là chuỗi một dòng dạng "1. [W] câu sau bước 1 -> 2. [C] câu sau bước 2".
 Số thứ tự và [C]/[W]/[S] ghi chế độ yêu cầu; dấu -> phân cách các bước.

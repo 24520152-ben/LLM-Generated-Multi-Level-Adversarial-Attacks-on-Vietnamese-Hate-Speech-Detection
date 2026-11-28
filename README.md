@@ -183,22 +183,48 @@ assess edit level, meaning and label preservation against the source and the ful
 path. Human review is deferred in the current version. Searches continue past the first prediction
 flip so that a rejected adversarial example does not hide later valid ones.
 
-C guidance was revised after the uncached pilot mostly returned unchanged text.
-The prompt now requires a nonidentity edit, explains whole-comment grapheme costs
-(including two edits for swapping adjacent characters), and supplies two synthetic
-Vietnamese demonstrations in the same JSON-array format as the requested output.
-All ten example candidates pass the existing C screen even at a one-edit limit.
-It permits local spelling/diacritic changes only when the intended reading is
-preserved, and allows fewer candidates rather than padding with unchanged copies.
-This adapts typo/few-shot guidance from
-[PromptAttack, ICLR 2024, Sections 3.1/3.3](https://proceedings.iclr.cc/paper_files/paper/2024/file/0c72285e193ec90dca93258128698cfb-Paper-Conference.pdf)
-and operations from [TextBugger, NDSS 2019, Section III-C](https://www.ndss-symposium.org/wp-content/uploads/2019/02/ndss2019_03A-5_Li_paper.pdf).
-The examples/counting policy are project choices, not Vietnamese thresholds
-validated by those papers. Filters and shared prompts are unchanged; W/S wording is preserved but now
-uses multiline formatting;
-both C and MIX need fresh model evaluation under the revised C prompt. Existing
-pilot CSVs still describe the previous prompt. Syntax/example checks do not prove
-that Qwen3 follows the new instructions or that its candidates preserve meaning.
+The shared prompt now states the attack objective explicitly: induce an incorrect
+classifier prediction while preserving the comment's true label and meaning.
+Generation guidance for **each of C/W/S** contains **three synthetic input/output
+examples**, covering CLEAN/OFFENSIVE/HATE, with five distinct candidate strings
+per example. The JSON-array format matches actual generation. Examples are written
+for instruction, not copied from validation/test rows; they are not demonstrated
+successful attacks or human-validated annotations. The existing one-sentence
+Kaggle check is not used as an input demonstration.
+
+C examples cover local insertion/deletion/repetition/diacritic edits and varying
+edit locations; a separate conditional example explains the two-edit cost of a
+swap. W demonstrates local replacement, phrase expansion/contraction and two
+separate diff regions. S demonstrates clause reordering, topicalization and
+alternative structures while retaining participants, negation, numbers and
+causal/concessive relations. W examples use the default limits; the prompt tells
+the model to follow the active limits when these are smaller.
+
+Explicitly marked counterexamples cover unchanged/duplicate outputs, C versus W,
+W versus S, role reversal, oversized word spans and lost negation. The final user
+prompt separates real JSON data from demonstrations, requests diversity, and
+uses the actual requested count even when fewer than five slots remain. Per-step
+limits are relative to `current`; meaning/label preservation is relative to
+`original`. Returning the source unchanged or repeating a candidate is forbidden;
+fewer candidates are allowed instead of padding, including short S inputs with
+no suitable restructuring. These adapt
+[PromptAttack's few-shot guidance, ICLR 2024, Sections 3.1/3.3](https://proceedings.iclr.cc/paper_files/paper/2024/file/0c72285e193ec90dca93258128698cfb-Paper-Conference.pdf),
+[TREPAT's meaning-preserving reformulation, EMNLP 2025, Section 3.2/Appendix A](https://aclanthology.org/2025.emnlp-main.1405.pdf),
+and marked right/wrong demonstrations from
+[C-ICL, Findings EMNLP 2024](https://aclanthology.org/2024.findings-emnlp.590/).
+Three examples per mode and these Vietnamese examples are project choices;
+C-ICL studies information extraction, not Vietnamese attacks. More examples do
+not guarantee improvement: PromptAttack reports model-dependent few-shot effects.
+
+The 45 positive example strings pass the unchanged structural screens; all 15 C
+strings also fit a one-edit limit. This does not certify meaning or actual model
+compliance. The S judge wording is aligned with the generation definition: local
+synonym substitutions alone are insufficient. Earlier attack CSVs and judge votes
+describe the older prompts. Rerun generation and judge new paths under the updated
+rubric before reporting results for this version; use a new judge output location
+when comparing rubrics rather than resuming old votes. Keep model, seeds, budgets
+and decoding fixed for prompt comparisons and track duplicate rate, structural
+acceptance, semantic/mode validity and runtime alongside attack success.
 
 The shared generation prompt uses `VIHSD_LABEL_RUBRIC` in
 [`constants.py`](src/vihsd_attack/constants.py), following the original
