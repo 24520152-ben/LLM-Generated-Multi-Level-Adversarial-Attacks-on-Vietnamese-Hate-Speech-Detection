@@ -1,4 +1,4 @@
-"""Resume independent judges and combine their suggestions for human review."""
+"""Resume independent judges and combine their LLM validity decisions."""
 
 import csv
 from collections import Counter
@@ -138,7 +138,7 @@ def run_judge(config: JudgeConfig) -> Path:
 def merge_judgments(
     input_file: str | Path, output_dir: str | Path | None = None
 ) -> Path:
-    """Combine label/validity votes without discarding any human-review inputs.
+    """Combine label/validity votes without discarding any input cases.
 
     Args:
         input_file: Prepared prediction-flipping paths.
@@ -146,7 +146,7 @@ def merge_judgments(
 
     Returns:
         Suggestions CSV with source text, source label, candidate text, edit path
-        and LLM verdicts. Final human labels and valid ASR are not computed here.
+        and LLM verdicts. Source-based ASR is computed separately from these votes.
     """
     rows = load_inputs(input_file)
     directory = Path(output_dir) if output_dir else default_artifact_root() / "judges"
@@ -178,7 +178,7 @@ def merge_judgments(
             counts[review["valid"]] += 1
             writer.writerow(review)
     print(
-        f"LLM suggestions only (all still need human review): {dict(counts)}",
+        f"LLM-judged validity (human review deferred): {dict(counts)}",
         flush=True,
     )
     return output

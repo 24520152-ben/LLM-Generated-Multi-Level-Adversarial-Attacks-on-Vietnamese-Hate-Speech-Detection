@@ -1,9 +1,10 @@
 # ViHSD Baselines and Adversarial Attacks
 
-[Research proposal](project_proposal.md) — updated 28 November 2026.
+[Research proposal](project_proposal.md) — updated 29 November 2026.
 Four clean baselines have completed one run each (seed 42). Validation attack
-pilot outputs are available for all four classifiers. The LLM-judge stage is implemented;
-no judge or human annotation results are available yet.
+pilot outputs and three-LLM judge results are available for all four classifiers.
+The current version uses LLM-judged validity; human review and judge-model upgrades
+are deferred to a later version.
 
 ## Baseline results
 
@@ -161,13 +162,13 @@ character distance does not exclude a lexical replacement; the mode screens can
 overlap. The span length four is an implementation default for validation pilot,
 not a published Vietnamese threshold. W still depends on heuristic diff alignment
 and can accept typos or unsuitable rewrites; S deliberately defers linguistic-level
-judgment to annotation. Review both accepted and rejected candidates before freezing
-these limits. `status=mode` means an automatic edit/form limit failed; `scored`
+judgment to the post-search LLM judges. Structural-screen and judge acceptance
+rates are reported separately. `status=mode` means an automatic edit/form limit failed; `scored`
 means a classifier evaluation, not a human-confirmed mode label.
 
-There is no automatic semantic validator yet. Annotators must confirm the requested
-edit level, meaning, target, offensiveness, and label preservation against the source
-and, when checking a step, its parent. Searches continue past the first prediction
+There is no semantic validator inside the search. The three post-search LLM judges
+assess edit level, meaning and label preservation against the source and the full
+path. Human review is deferred in the current version. Searches continue past the first prediction
 flip so that a rejected adversarial example does not hide later valid ones.
 
 C guidance was revised after the uncached pilot mostly returned unchanged text.
@@ -257,11 +258,12 @@ and condition-specific validation from every contributing attack. ASR remains
 source-based within each attack condition. For full-test before/after metrics,
 each source contributes total weight one across its variants, with the original
 retained when no valid successful variant exists. These are construction and
-evaluation rules; annotation and final dataset export are not implemented yet.
+evaluation rules. LLM judging has run on the pilot; final dataset export is not
+implemented yet, and human review is deferred.
 
 Current pilot CSVs for all four classifiers include request-cache accounting.
 Earlier uncached outputs used a different prompt and are not a controlled timing
-comparison. Pilot outputs need human review before supporting valid attack-success claims.
+comparison. Current results are reported as LLM-judged ASR, without human-validation claims.
 Keep the notebook options and source revision with the experiment when reporting
 results. Choose the shared configuration on validation before attacking test.
 
@@ -316,7 +318,7 @@ Gemma does not see the first-stage answers. All models use text-only inputs,
 FP16 computation, SDPA and thinking disabled. Greedy decoding, 128 output tokens
 and an 8,192 input-token guard are implementation defaults, not validated optimal
 settings. Overlong inputs stay unresolved; comments and paths are never silently
-truncated. The three quantized checkpoints still need an end-to-end T4 run.
+truncated. All three quantized checkpoints completed the pilot on Kaggle T4 GPUs.
 
 Settings are in `src/vihsd_attack/judges/config.py` and prompts in
 `src/vihsd_attack/judges/constants.py`. Judges return the final label and one
@@ -326,7 +328,7 @@ nor other judges' answers. Code then compares the judge's label with the source
 label: final `valid=YES` requires meaning, mode and label preservation together.
 A definite failure gives `NO`; uncertainty, malformed JSON or an overlong input
 stays `UNSURE`. Benchmark support for Vietnamese does not establish judge accuracy;
-calibrate against independent human annotations before trusting these results.
+human calibration and judge-model upgrades are deferred in this version.
 
 Outputs stay flat under `artifacts/judges/`:
 
@@ -349,10 +351,8 @@ Gemma is called if either the candidate label or validity disagrees, or either
 is `UNSURE`. Final label and validity each require two matching non-uncertain
 votes; failure to reach that threshold stays `UNSURE`. Both failed responses and
 genuine uncertainty are unresolved votes. No path is removed, including `valid=NO`.
-These are **LLM suggestions, not final human labels**. Do not label a whole variant
-valid in every condition because one path was accepted. Give each annotator a
-separate working copy: rerunning the merge replaces `suggestions.csv` without
-rerunning model inference. With merged validity, these files do not identify
+These are **LLM-judged results for the current version**, without human validation. Do not label a whole variant
+valid in every condition because one path was accepted. Rerunning the merge replaces `suggestions.csv` without rerunning model inference. With merged validity, these files do not identify
 whether an invalid path failed on meaning or edit level.
 
 Files are joined by **`source_id` + `path`**, including when judge row orders differ.
@@ -367,11 +367,19 @@ skip saved source/path pairs. To resume in a new
 Kaggle session, restore those CSVs into `OUTPUT_DIR` alongside the same input CSV.
 Changing prompts/settings requires a different output directory or explicitly
 removing the old judge outputs. One process may write each judge CSV at a time.
-Human verification, adjudication and final test-set export remain separate work;
-two independent human reviews, with a third adjudicator for disagreements, are
-planned. Human initial labels should be recorded before revealing LLM suggestions.
+Human verification and judge-model upgrades are deferred; they are not a required
+phase in the current version. Final test-set export remains future work. If human
+review is added later, keep those labels separate from the existing LLM votes.
 
 Model interfaces follow the official cards:
 [Qwen3.5](https://huggingface.co/Qwen/Qwen3.5-9B),
 [SEA-LION](https://huggingface.co/aisingapore/Llama-SEA-LION-v3.5-8B-R),
 and [Gemma 4](https://huggingface.co/google/gemma-4-12B-it).
+
+
+Current pilot consensus: **172/1,773 paths (9.70%)** receive `valid=YES`, representing
+**141 distinct source/variant pairs**. Gemma judged 925 routed paths. SEA-LION
+returned `NO` on every case, so all final `YES` results require agreement between
+Qwen and Gemma. There are 495 unresolved candidate labels, all with final
+`valid=NO`. Path acceptance is distinct from source-based ASR_LLM; these results
+do not establish judge accuracy. CSVs remain under `artifacts/judges/`.
